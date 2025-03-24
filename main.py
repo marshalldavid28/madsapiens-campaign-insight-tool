@@ -107,7 +107,7 @@ async def generate_insights(
         prompt = f"""
 You are a paid digital advertising strategist analyzing a DV360 campaign.
 
-Write a structured, professional report, focusing on the **primary metric**: ctr and the **secondary metric**: cpm.
+Write a structured, professional report using the data below:
 
 ### **Key Performance Metrics**
 - CTR Target: {ctr_target}%
