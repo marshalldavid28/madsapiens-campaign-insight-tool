@@ -77,7 +77,7 @@ async def generate_insights(
                     pivot_analysis += f"- Cost per Conv: SGD {row['Cost per Conv (SGD)']:.2f}\n"
 
         prompt = f"""
-You are a digital strategist who personally ran a DV360 campaign.
+You are a paid digital advertising campaign specialist who personally ran a DV360 campaign.
 
 Write a professional, confident, first-person report summarizing campaign performance. Ensure that you dont come across as too excited. 
 Phrases like "Im proud to announce" should be avoided. Speak corporate, to the point and professional. Should not sound conversational.
@@ -105,7 +105,6 @@ Some tips for each of the above sections:
 2. Overall Planned vs Delivered: Make sure that his section compares what was expected to what was delivered. Keep it sharp and to the point, but feel free to corporate in making this part sound good if the perforamnce was above expectations.
 3. Line Item Observations:  This is usually where the audience targeting layer sits. So analyse the line item performance and ensure to speak about this in sgranular detail. Which audience performed better, what was the performance, what do we recommend to the client, any reason why this audience may have performend better for this brand etc are questions you should consider.
 4. Conversion Analysis - Go into data detail with this. Explain what the performance was and leave some space for the user to add their own thoughts.
-
 Use the data below. Where helpful, feel free to explain performance trends logically, based only on available metrics. Do not guess optimizations — but you may add two or three possible contributing factors (clearly marked).
 
 Data:
