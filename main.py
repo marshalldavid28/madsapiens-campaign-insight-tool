@@ -35,10 +35,8 @@ async def generate_insights(
         contents = await file.read()
         df = pd.read_excel(BytesIO(contents))
 
-        # Clean Spend column
         df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
 
-        # Basic metrics
         total_impressions = df['Impressions'].sum()
         total_clicks = df['Clicks'].sum()
         total_spend = df['Spend'].sum()
@@ -51,42 +49,45 @@ async def generate_insights(
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
         prompt = f"""
-You are a digital media strategist who ran a DV360 campaign.
-Generate a structured insights report in a professional but human tone.
-The user will manually insert optimization notes later — include clear placeholders for those.
+You are a digital strategist who personally ran a DV360 campaign.
 
-CAMPAIGN INFO:
+Write a professional, confident, first-person report summarizing campaign performance.
+Be detailed and structured. Use a clear sectioned format like this:
+
+1. Executive Summary
+2. Platform Performance vs KPIs
+3. Line Item Observations
+4. Conversion Analysis
+5. Recommendations / Strategy Updates
+
+Use the data below. Where helpful, feel free to explain performance trends logically, based only on available metrics. Do not guess optimizations — but you may add two or three possible contributing factors (clearly marked).
+
+Data:
 - Objective: {objective}
 - Budget: SGD {budget}
-- Flight Dates: {flight}
+- Flight: {flight}
 - CTR Target: {ctr_target}%
 - CPM Target: SGD {cpm_target}
 
-PERFORMANCE:
+Performance:
 - Impressions: {total_impressions}
 - Clicks: {total_clicks}
 - CTR: {ctr}%
 - Spend: SGD {total_spend}
 - CPM: SGD {cpm}
 - CPC: SGD {cpc}
-- Conversions: {total_conversions}
+- Conversions (Landing Page Visits): {total_conversions}
 - Conversion Rate: {conv_rate}%
-- Cost/Conversion: SGD {cost_per_conv}
+- Cost per Conversion: SGD {cost_per_conv}
 
-Start with a short Executive Summary.
-Then break the report into structured sections:
-1. Platform-Level Performance vs KPIs
-2. Line Item-Level Observations (placeholder: [insert user insights])
-3. Conversion Analysis
-4. Recommendations (placeholder: [insert user suggestions])
-
-Avoid guessing what optimizations were done — just mark them clearly.
+Write in first person, like a strategist explaining this to a team or client. Be sharp, confident, and clear. Keep it realistic — not too fluffy. Expand on the insights where useful.
 """
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
+            temperature=0.8,
             messages=[
-                {"role": "system", "content": "You write reports like a digital strategist."},
+                {"role": "system", "content": "You are a professional digital strategist who writes structured, confident campaign performance reports in first person."},
                 {"role": "user", "content": prompt}
             ]
         )
