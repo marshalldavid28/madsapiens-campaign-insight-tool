@@ -21,6 +21,15 @@ async def generate_insights(
         contents = await file.read()
         df = pd.read_excel(BytesIO(contents))
 
+        # Debugging: Log received inputs
+        print("🔹 Received Inputs:")
+        print(f"Primary Metric: {primary_metric}")
+        print(f"Secondary Metric: {secondary_metric}")
+
+        # Log available columns in the uploaded file
+        available_columns = df.columns.tolist()
+        print("🔹 Available Columns in Uploaded File:", available_columns)
+
         # Clean Spend column if necessary
         if 'Spend' in df.columns and df['Spend'].dtype == 'object':
             df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
@@ -39,12 +48,22 @@ async def generate_insights(
         primary_metric_col = metric_mapping.get(primary_metric, primary_metric)
         secondary_metric_col = metric_mapping.get(secondary_metric, secondary_metric)
 
-        # Check if the columns exist in the DataFrame
-        if primary_metric_col not in df.columns:
-            return JSONResponse(status_code=400, content={"error": f"Primary metric '{primary_metric}' not found in dataset."})
+        # Validate metric columns
+        missing_columns = []
+        if primary_metric_col not in available_columns:
+            missing_columns.append(primary_metric)
+        if secondary_metric_col not in available_columns:
+            missing_columns.append(secondary_metric)
 
-        if secondary_metric_col not in df.columns:
-            return JSONResponse(status_code=400, content={"error": f"Secondary metric '{secondary_metric}' not found in dataset."})
+        if missing_columns:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "One or more selected metrics were not found in the dataset.",
+                    "missing_metrics": missing_columns,
+                    "available_columns": available_columns
+                }
+            )
 
         # Calculate overall metrics
         total_impressions = df['Impressions'].sum()
@@ -67,13 +86,6 @@ async def generate_insights(
                 primary_metric_col: 'sum',
                 secondary_metric_col: 'sum'
             }).reset_index()
-
-            # Calculate additional metrics
-            grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
-            grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
-            grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
-
-            grouped = grouped.fillna(0)
 
             # Sort by Primary Metric to find Top 5 & Bottom 5 performers
             sorted_grouped = grouped.sort_values(by=primary_metric_col, ascending=False)
