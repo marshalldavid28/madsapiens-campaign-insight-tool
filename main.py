@@ -51,14 +51,32 @@ async def generate_insights(
         prompt = f"""
 You are a digital strategist who personally ran a DV360 campaign.
 
-Write a professional, confident, first-person report summarizing campaign performance.
+Write a professional, confident, first-person report summarizing campaign performance. Ensure that you dont come across as too excited. 
+Phrases like "Im proud to announce" should be avoided. Speak corporate, to the point and professional. Should not sound conversational.
+
+Good example:
+
+"The campaign has performed well this month with a CTR of x%, which is y times higher than the planned CTR which was z%."
+
+Bad example:
+
+"I am happy to note that the campaign has done really well, despite some challenge" - this is too conversational and storytelling-esque.
+
 Be detailed and structured. Use a clear sectioned format like this:
 
 1. Executive Summary
-2. Platform Performance vs KPIs
+2. Overall Planned vs Delivered
 3. Line Item Observations
 4. Conversion Analysis
 5. Recommendations / Strategy Updates
+
+
+Some tips for each of the above sections:
+
+1. Executive Summary: Make sure that, while this is a summary, it has some of the key data points that the client would want to know. A good way to think about this is, if the client is doesnt have time to read the rest of the insights, this section should highlight the most important outcomes.
+2. Overall Planned vs Delivered: Make sure that his section compares what was expected to what was delivered. Keep it sharp and to the point, but feel free to corporate in making this part sound good if the perforamnce was above expectations.
+3. Line Item Observations:  This is usually where the audience targeting layer sits. So analyse the line item performance and ensure to speak about this in sgranular detail. Which audience performed better, what was the performance, what do we recommend to the client, any reason why this audience may have performend better for this brand etc are questions you should consider.
+4. Conversion Analysis - Go into data detail with this. Explain what the performance was and leave some space for the user to add their own thoughts.
 
 Use the data below. Where helpful, feel free to explain performance trends logically, based only on available metrics. Do not guess optimizations — but you may add two or three possible contributing factors (clearly marked).
 
