@@ -25,6 +25,27 @@ async def generate_insights(
         if 'Spend' in df.columns and df['Spend'].dtype == 'object':
             df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
 
+        # Standardized column mapping
+        metric_mapping = {
+            "CTR": "CTR (%)",
+            "CPM": "CPM (SGD)",
+            "CPC": "CPC (SGD)",
+            "Conversions": "Total Conversions",
+            "Conv Rate": "Conv Rate (%)",
+            "Cost per Conv": "Cost per Conv (SGD)"
+        }
+
+        # Get the correct column names
+        primary_metric_col = metric_mapping.get(primary_metric, primary_metric)
+        secondary_metric_col = metric_mapping.get(secondary_metric, secondary_metric)
+
+        # Check if the columns exist in the DataFrame
+        if primary_metric_col not in df.columns:
+            return JSONResponse(status_code=400, content={"error": f"Primary metric '{primary_metric}' not found in dataset."})
+
+        if secondary_metric_col not in df.columns:
+            return JSONResponse(status_code=400, content={"error": f"Secondary metric '{secondary_metric}' not found in dataset."})
+
         # Calculate overall metrics
         total_impressions = df['Impressions'].sum()
         total_clicks = df['Clicks'].sum()
@@ -38,40 +59,37 @@ async def generate_insights(
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
         # Group by Insertion Order and Line Item
-        pivot_analysis = "### Performance Breakdown by Insertion Order & Line Item\n"
-
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
                 'Impressions': 'sum',
                 'Clicks': 'sum',
                 'Spend': 'sum',
-                'Total Conversions': 'sum' if 'Total Conversions' in df.columns else lambda x: 0
+                primary_metric_col: 'sum',
+                secondary_metric_col: 'sum'
             }).reset_index()
 
             # Calculate additional metrics
             grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
             grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
             grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
-            
-            if 'Total Conversions' in df.columns:
-                grouped['Conv Rate (%)'] = (grouped['Total Conversions'] / grouped['Clicks']) * 100
-                grouped['Cost per Conv (SGD)'] = grouped['Spend'] / grouped['Total Conversions']
 
             grouped = grouped.fillna(0)
 
             # Sort by Primary Metric to find Top 5 & Bottom 5 performers
-            sorted_grouped = grouped.sort_values(by=primary_metric, ascending=False)
+            sorted_grouped = grouped.sort_values(by=primary_metric_col, ascending=False)
 
             top_performers = sorted_grouped.head(5)
             bottom_performers = sorted_grouped.tail(5)
 
             pivot_analysis = "### Top 5 Performing Line Items:\n"
             for _, row in top_performers.iterrows():
-                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric]:.2f}\n"
+                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric_col]:.2f}\n"
 
             pivot_analysis += "\n### Bottom 5 Performing Line Items:\n"
             for _, row in bottom_performers.iterrows():
-                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric]:.2f}\n"
+                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric_col]:.2f}\n"
+        else:
+            pivot_analysis = "No Insertion Order or Line Item data found."
 
         # Prepare the AI prompt (limit text length to avoid token overuse)
         prompt = f"""
