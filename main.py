@@ -13,57 +13,42 @@ async def generate_insights(
     ctr_target: float = Form(...),
     cpm_target: float = Form(...),
     budget: float = Form(...),
-    flight: str = Form(...),
-    primary_metric: str = Form(...),
-    secondary_metric: str = Form(...)
+    flight: str = Form(...)
 ):
     try:
         contents = await file.read()
+
+        # Check if file is empty
+        if len(contents) == 0:
+            return JSONResponse(status_code=400, content={"error": "Uploaded file is empty."})
+
         df = pd.read_excel(BytesIO(contents))
 
         # Debugging: Log received inputs
         print("🔹 Received Inputs:")
-        print(f"Primary Metric: {primary_metric}")
-        print(f"Secondary Metric: {secondary_metric}")
+        print(f"Objective: {objective}, CTR Target: {ctr_target}, CPM Target: {cpm_target}")
 
         # Log available columns in the uploaded file
         available_columns = df.columns.tolist()
         print("🔹 Available Columns in Uploaded File:", available_columns)
 
-        # Clean Spend column if necessary
-        if 'Spend' in df.columns and df['Spend'].dtype == 'object':
-            df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
-
-        # Standardized column mapping
-        metric_mapping = {
-            "CTR": "CTR (%)",
-            "CPM": "CPM (SGD)",
-            "CPC": "CPC (SGD)",
-            "Conversions": "Total Conversions",
-            "Conv Rate": "Conv Rate (%)",
-            "Cost per Conv": "Cost per Conv (SGD)"
-        }
-
-        # Get the correct column names
-        primary_metric_col = metric_mapping.get(primary_metric, primary_metric)
-        secondary_metric_col = metric_mapping.get(secondary_metric, secondary_metric)
-
-        # Validate metric columns
-        missing_columns = []
-        if primary_metric_col not in available_columns:
-            missing_columns.append(primary_metric)
-        if secondary_metric_col not in available_columns:
-            missing_columns.append(secondary_metric)
+        # Ensure necessary columns exist
+        required_columns = ['Impressions', 'Clicks', 'Spend', 'Total Conversions']
+        missing_columns = [col for col in required_columns if col not in df.columns]
 
         if missing_columns:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "One or more selected metrics were not found in the dataset.",
-                    "missing_metrics": missing_columns,
+                    "error": "Dataset is missing required columns.",
+                    "missing_columns": missing_columns,
                     "available_columns": available_columns
                 }
             )
+
+        # Clean Spend column if necessary
+        if df['Spend'].dtype == 'object':
+            df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
 
         # Calculate overall metrics
         total_impressions = df['Impressions'].sum()
@@ -82,24 +67,25 @@ async def generate_insights(
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
                 'Impressions': 'sum',
                 'Clicks': 'sum',
-                'Spend': 'sum',
-                primary_metric_col: 'sum',
-                secondary_metric_col: 'sum'
+                'Spend': 'sum'
             }).reset_index()
 
-            # Sort by Primary Metric to find Top 5 & Bottom 5 performers
-            sorted_grouped = grouped.sort_values(by=primary_metric_col, ascending=False)
+            # Calculate additional metrics
+            grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
+            grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
+            grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
+            grouped = grouped.fillna(0)
 
-            top_performers = sorted_grouped.head(5)
-            bottom_performers = sorted_grouped.tail(5)
+            pivot_analysis = "### Performance Breakdown by Insertion Order & Line Item:\n"
+            for _, row in grouped.iterrows():
+                pivot_analysis += f"\nInsertion Order: {row['Insertion Order']} | Line Item: {row['Line Item']}\n"
+                pivot_analysis += f"- Impressions: {int(row['Impressions'])}\n"
+                pivot_analysis += f"- Clicks: {int(row['Clicks'])}\n"
+                pivot_analysis += f"- CTR: {row['CTR (%)']:.2f}%\n"
+                pivot_analysis += f"- Spend: SGD {row['Spend']:.2f}\n"
+                pivot_analysis += f"- CPM: SGD {row['CPM (SGD)']:.2f}\n"
+                pivot_analysis += f"- CPC: SGD {row['CPC (SGD)']:.2f}\n"
 
-            pivot_analysis = "### Top 5 Performing Line Items:\n"
-            for _, row in top_performers.iterrows():
-                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric_col]:.2f}\n"
-
-            pivot_analysis += "\n### Bottom 5 Performing Line Items:\n"
-            for _, row in bottom_performers.iterrows():
-                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric_col]:.2f}\n"
         else:
             pivot_analysis = "No Insertion Order or Line Item data found."
 
