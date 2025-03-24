@@ -133,8 +133,8 @@ Write in a clear, concise, and professional manner.
         report_text = response.choices[0].message.content
         return JSONResponse(content={"report": report_text})
 
-except Exception as e:
-    import traceback
-    error_details = traceback.format_exc()  # Get full error details
-    print("ERROR:", error_details)  # Print the error in logs
-    return JSONResponse(status_code=500, content={"error": str(e), "details": error_details})
+    except Exception as e:  # ✅ Now correctly indented inside `try`
+        import traceback
+        error_details = traceback.format_exc()  # Get full error details
+        print("ERROR:", error_details)  # Print the error in logs
+        return JSONResponse(status_code=500, content={"error": str(e), "details": error_details})
