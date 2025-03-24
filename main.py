@@ -87,7 +87,7 @@ Data:
 - CTR Target: {ctr_target}%
 - CPM Target: SGD {cpm_target}
 
-Performance:
+Overall Performance:
 - Impressions: {total_impressions}
 - Clicks: {total_clicks}
 - CTR: {ctr}%
@@ -98,7 +98,11 @@ Performance:
 - Conversion Rate: {conv_rate}%
 - Cost per Conversion: SGD {cost_per_conv}
 
+{pivot_analysis}
+
 Write in first person, like a strategist explaining this to a team or client. Be sharp, confident, and clear. Keep it realistic — not too fluffy. Expand on the insights where useful.
+
+In the Line Item Observations section, analyze the performance of each Insertion Order and Line Item, comparing their metrics against each other and against the overall campaign KPIs. Identify top and bottom performers, unusual patterns, and potential optimization opportunities.
 """
 
         response = openai.ChatCompletion.create(
