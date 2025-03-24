@@ -1,27 +1,3 @@
-from fastapi import FastAPI, File, UploadFile, Form
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
-import openai
-import os
-from io import BytesIO
-from dotenv import load_dotenv
-
-load_dotenv()
-
-app = FastAPI()
-
-# Allow CORS for local dev or frontend usage
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
 @app.post("/generate-insights/")
 async def generate_insights(
     file: UploadFile = File(...),
@@ -35,18 +11,70 @@ async def generate_insights(
         contents = await file.read()
         df = pd.read_excel(BytesIO(contents))
 
-        df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
+        # Clean the spend column if needed
+        if 'Spend' in df.columns and df['Spend'].dtype == 'object':
+            df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
 
+        # Calculate overall metrics (as before)
         total_impressions = df['Impressions'].sum()
         total_clicks = df['Clicks'].sum()
         total_spend = df['Spend'].sum()
-        total_conversions = df['Total Conversions'].sum()
+        total_conversions = df['Total Conversions'].sum() if 'Total Conversions' in df.columns else 0
 
-        ctr = round((total_clicks / total_impressions) * 100, 2)
-        cpm = round((total_spend / total_impressions) * 1000, 2)
-        cpc = round(total_spend / total_clicks, 2)
+        ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions else 0
+        cpm = round((total_spend / total_impressions) * 1000, 2) if total_impressions else 0
+        cpc = round(total_spend / total_clicks, 2) if total_clicks else 0
         conv_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
+
+        # Create pivot-style analysis by Insertion Order and Line Item
+        pivot_analysis = ""
+        
+        # Check if the necessary columns exist for grouping
+        groupby_columns = []
+        if 'Insertion Order' in df.columns:
+            groupby_columns.append('Insertion Order')
+        if 'Line Item' in df.columns:
+            groupby_columns.append('Line Item')
+            
+        if groupby_columns:
+            # Group by Insertion Order and/or Line Item and calculate metrics
+            grouped = df.groupby(groupby_columns).agg({
+                'Impressions': 'sum',
+                'Clicks': 'sum',
+                'Spend': 'sum',
+                'Total Conversions': 'sum' if 'Total Conversions' in df.columns else lambda x: 0
+            }).reset_index()
+            
+            # Calculate derived metrics for each group
+            grouped['CTR (%)'] = round((grouped['Clicks'] / grouped['Impressions']) * 100, 2)
+            grouped['CPM (SGD)'] = round((grouped['Spend'] / grouped['Impressions']) * 1000, 2)
+            grouped['CPC (SGD)'] = round(grouped['Spend'] / grouped['Clicks'], 2)
+            
+            if 'Total Conversions' in df.columns:
+                grouped['Conv Rate (%)'] = round((grouped['Total Conversions'] / grouped['Clicks']) * 100, 2)
+                grouped['Cost per Conv (SGD)'] = round(grouped['Spend'] / grouped['Total Conversions'], 2)
+            
+            # Format the grouped data for the prompt
+            pivot_analysis = "Detailed Breakdown:\n"
+            
+            # Handle potential NaN values
+            grouped = grouped.fillna(0)
+            
+            for _, row in grouped.iterrows():
+                group_name = " > ".join([f"{col}: {row[col]}" for col in groupby_columns])
+                pivot_analysis += f"\n{group_name}\n"
+                pivot_analysis += f"- Impressions: {int(row['Impressions'])}\n"
+                pivot_analysis += f"- Clicks: {int(row['Clicks'])}\n"
+                pivot_analysis += f"- CTR: {row['CTR (%)']:.2f}%\n"
+                pivot_analysis += f"- Spend: SGD {row['Spend']:.2f}\n"
+                pivot_analysis += f"- CPM: SGD {row['CPM (SGD)']:.2f}\n"
+                pivot_analysis += f"- CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                
+                if 'Total Conversions' in df.columns:
+                    pivot_analysis += f"- Conversions: {int(row['Total Conversions'])}\n"
+                    pivot_analysis += f"- Conv Rate: {row['Conv Rate (%)']:.2f}%\n"
+                    pivot_analysis += f"- Cost per Conv: SGD {row['Cost per Conv (SGD)']:.2f}\n"
 
         prompt = f"""
 You are a digital strategist who personally ran a DV360 campaign.
