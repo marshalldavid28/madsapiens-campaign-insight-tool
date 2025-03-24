@@ -134,4 +134,7 @@ Write in a clear, concise, and professional manner.
         return JSONResponse(content={"report": report_text})
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    import traceback
+    error_details = traceback.format_exc()  # Get the full error stack trace
+    print("ERROR:", error_details)  # Print error details in the console
+    return JSONResponse(status_code=500, content={"error": str(e), "details": error_details})
