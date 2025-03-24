@@ -120,7 +120,11 @@ Write in confident, natural first person as if I ran the campaign.
             ]
         )
 
-        report_text = response.choices[0].message.content
+        # Log full response
+        print("🔍 OpenAI Response:")
+        print(response)
+
+        report_text = response.choices[0].message.content if response.choices else "No response generated."
         return JSONResponse(content={"report": report_text})
 
     except Exception as e:
