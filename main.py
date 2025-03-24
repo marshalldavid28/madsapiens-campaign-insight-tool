@@ -10,29 +10,17 @@ async def generate_insights(
     try:
         contents = await file.read()
         df = pd.read_excel(BytesIO(contents))
-        
-        # Print column names for debugging (can be removed in production)
-        print(f"Columns in uploaded Excel: {df.columns.tolist()}")
-        
-        # Flexible column name handling - check for variations
-        impressions_col = next((col for col in df.columns if 'impression' in col.lower()), 'Impressions')
-        clicks_col = next((col for col in df.columns if 'click' in col.lower() and 'ctr' not in col.lower()), 'Clicks')
-        spend_col = next((col for col in df.columns if 'spend' in col.lower() or 'cost' in col.lower()), 'Spend')
-        conversions_col = next((col for col in df.columns 
-                              if any(x in col.lower() for x in ['conversion', 'conv', 'action'])), 
-                              'Total Conversions')
-        
-        # Clean the spend column if needed
-        if df[spend_col].dtype == 'object':
-            df[spend_col] = df[spend_col].str.replace('S$', '', regex=False).astype(float)
-        
-        # Calculate overall metrics with flexible column names
-        total_impressions = df[impressions_col].sum()
-        total_clicks = df[clicks_col].sum()
-        total_spend = df[spend_col].sum()
-        total_conversions = df[conversions_col].sum() if conversions_col in df.columns else 0
 
-        # Safe calculations to handle division by zero
+        # Clean the spend column if needed
+        if 'Spend' in df.columns and df['Spend'].dtype == 'object':
+            df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
+
+        # Calculate overall metrics (as before)
+        total_impressions = df['Impressions'].sum()
+        total_clicks = df['Clicks'].sum()
+        total_spend = df['Spend'].sum()
+        total_conversions = df['Total Conversions'].sum() if 'Total Conversions' in df.columns else 0
+
         ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions else 0
         cpm = round((total_spend / total_impressions) * 1000, 2) if total_impressions else 0
         cpc = round(total_spend / total_clicks, 2) if total_clicks else 0
@@ -42,79 +30,33 @@ async def generate_insights(
         # Create pivot-style analysis by Insertion Order and Line Item
         pivot_analysis = ""
         
-        # Check for common dimension column names with flexible matching
-        dimension_columns = {
-            'Insertion Order': next((col for col in df.columns 
-                                  if any(x in col.lower() for x in ['insertion order', 'io', 'campaign'])), 
-                                  None),
-            'Line Item': next((col for col in df.columns 
-                             if any(x in col.lower() for x in ['line item', 'li', 'ad group'])), 
-                             None)
-        }
-        
-        # Filter out None values
-        groupby_columns = [col_name for col_name, col in dimension_columns.items() if col is not None]
-        actual_columns = [dimension_columns[col] for col in groupby_columns]
+        # Check if the necessary columns exist for grouping
+        groupby_columns = []
+        if 'Insertion Order' in df.columns:
+            groupby_columns.append('Insertion Order')
+        if 'Line Item' in df.columns:
+            groupby_columns.append('Line Item')
             
-        if actual_columns:
-            # Create a mapping dictionary for flexible column names
-            col_mapping = {
-                dimension_columns[col]: col for col in groupby_columns
-            }
-            col_mapping[impressions_col] = 'Impressions'
-            col_mapping[clicks_col] = 'Clicks'
-            col_mapping[spend_col] = 'Spend'
-            if conversions_col in df.columns:
-                col_mapping[conversions_col] = 'Total Conversions'
-            
-            # Rename columns for analysis
-            analysis_df = df.rename(columns=col_mapping)
-            
+        if groupby_columns:
             # Group by Insertion Order and/or Line Item and calculate metrics
-            agg_cols = {
+            grouped = df.groupby(groupby_columns).agg({
                 'Impressions': 'sum',
                 'Clicks': 'sum',
-                'Spend': 'sum'
-            }
-            
-            if 'Total Conversions' in analysis_df.columns:
-                agg_cols['Total Conversions'] = 'sum'
-                
-            grouped = analysis_df.groupby(groupby_columns).agg(agg_cols).reset_index()
+                'Spend': 'sum',
+                'Total Conversions': 'sum' if 'Total Conversions' in df.columns else lambda x: 0
+            }).reset_index()
             
             # Calculate derived metrics for each group
-            grouped['CTR (%)'] = grouped.apply(
-                lambda x: round((x['Clicks'] / x['Impressions']) * 100, 2) if x['Impressions'] > 0 else 0, 
-                axis=1
-            )
-            grouped['CPM (SGD)'] = grouped.apply(
-                lambda x: round((x['Spend'] / x['Impressions']) * 1000, 2) if x['Impressions'] > 0 else 0, 
-                axis=1
-            )
-            grouped['CPC (SGD)'] = grouped.apply(
-                lambda x: round(x['Spend'] / x['Clicks'], 2) if x['Clicks'] > 0 else 0, 
-                axis=1
-            )
+            grouped['CTR (%)'] = round((grouped['Clicks'] / grouped['Impressions']) * 100, 2)
+            grouped['CPM (SGD)'] = round((grouped['Spend'] / grouped['Impressions']) * 1000, 2)
+            grouped['CPC (SGD)'] = round(grouped['Spend'] / grouped['Clicks'], 2)
             
-            if 'Total Conversions' in grouped.columns:
-                grouped['Conv Rate (%)'] = grouped.apply(
-                    lambda x: round((x['Total Conversions'] / x['Clicks']) * 100, 2) if x['Clicks'] > 0 else 0, 
-                    axis=1
-                )
-                grouped['Cost per Conv (SGD)'] = grouped.apply(
-                    lambda x: round(x['Spend'] / x['Total Conversions'], 2) if x['Total Conversions'] > 0 else 0, 
-                    axis=1
-                )
-            
-            # Add performance indicators compared to targets
-            grouped['CTR vs Target'] = grouped['CTR (%)'] - ctr_target
-            grouped['CPM vs Target'] = cpm_target - grouped['CPM (SGD)']  # Inverted since lower CPM is better
-            
-            # Sort by performance (CTR)
-            grouped = grouped.sort_values('CTR (%)', ascending=False)
+            if 'Total Conversions' in df.columns:
+                grouped['Conv Rate (%)'] = round((grouped['Total Conversions'] / grouped['Clicks']) * 100, 2)
+                grouped['Cost per Conv (SGD)'] = round(grouped['Spend'] / grouped['Total Conversions'], 2)
             
             # Format the grouped data for the prompt
-            pivot_analysis = "Detailed Breakdown (sorted by CTR performance):\n"
+            pivot_analysis = "Detailed Breakdown:\n"
             
             # Handle potential NaN values
             grouped = grouped.fillna(0)
@@ -124,12 +66,12 @@ async def generate_insights(
                 pivot_analysis += f"\n{group_name}\n"
                 pivot_analysis += f"- Impressions: {int(row['Impressions'])}\n"
                 pivot_analysis += f"- Clicks: {int(row['Clicks'])}\n"
-                pivot_analysis += f"- CTR: {row['CTR (%)']:.2f}% ({'+' if row['CTR vs Target'] >= 0 else ''}{row['CTR vs Target']:.2f}% vs target)\n"
+                pivot_analysis += f"- CTR: {row['CTR (%)']:.2f}%\n"
                 pivot_analysis += f"- Spend: SGD {row['Spend']:.2f}\n"
-                pivot_analysis += f"- CPM: SGD {row['CPM (SGD)']:.2f} ({'+' if row['CPM vs Target'] >= 0 else ''}{row['CPM vs Target']:.2f} vs target)\n"
+                pivot_analysis += f"- CPM: SGD {row['CPM (SGD)']:.2f}\n"
                 pivot_analysis += f"- CPC: SGD {row['CPC (SGD)']:.2f}\n"
                 
-                if 'Total Conversions' in grouped.columns:
+                if 'Total Conversions' in df.columns:
                     pivot_analysis += f"- Conversions: {int(row['Total Conversions'])}\n"
                     pivot_analysis += f"- Conv Rate: {row['Conv Rate (%)']:.2f}%\n"
                     pivot_analysis += f"- Cost per Conv: SGD {row['Cost per Conv (SGD)']:.2f}\n"
@@ -203,7 +145,4 @@ In the Line Item Observations section, analyze the performance of each Insertion
         return JSONResponse(content={"report": report_text})
 
     except Exception as e:
-        print(f"Error in generate_insights: {str(e)}")
-        import traceback
-        traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
