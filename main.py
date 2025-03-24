@@ -59,65 +59,46 @@ async def generate_insights(
 
             grouped = grouped.fillna(0)
 
-            # Formatting grouped data into structured breakdown
-            for _, row in grouped.iterrows():
-                pivot_analysis += f"\nInsertion Order: {row['Insertion Order']} | Line Item: {row['Line Item']}\n"
-                pivot_analysis += f"- Impressions: {int(row['Impressions'])}\n"
-                pivot_analysis += f"- Clicks: {int(row['Clicks'])}\n"
-                pivot_analysis += f"- CTR: {row['CTR (%)']:.2f}%\n"
-                pivot_analysis += f"- Spend: SGD {row['Spend']:.2f}\n"
-                pivot_analysis += f"- CPM: SGD {row['CPM (SGD)']:.2f}\n"
-                pivot_analysis += f"- CPC: SGD {row['CPC (SGD)']:.2f}\n"
+            # Sort by Primary Metric to find Top 5 & Bottom 5 performers
+            sorted_grouped = grouped.sort_values(by=primary_metric, ascending=False)
 
-                if 'Total Conversions' in df.columns:
-                    pivot_analysis += f"- Conversions: {int(row['Total Conversions'])}\n"
-                    pivot_analysis += f"- Conv Rate: {row['Conv Rate (%)']:.2f}%\n"
-                    pivot_analysis += f"- Cost per Conv: SGD {row['Cost per Conv (SGD)']:.2f}\n"
+            top_performers = sorted_grouped.head(5)
+            bottom_performers = sorted_grouped.tail(5)
 
-        # Prepare the AI prompt
+            pivot_analysis = "### Top 5 Performing Line Items:\n"
+            for _, row in top_performers.iterrows():
+                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric]:.2f}\n"
+
+            pivot_analysis += "\n### Bottom 5 Performing Line Items:\n"
+            for _, row in bottom_performers.iterrows():
+                pivot_analysis += f"- {row['Insertion Order']} | {row['Line Item']}: {row[primary_metric]:.2f}\n"
+
+        # Prepare the AI prompt (limit text length to avoid token overuse)
         prompt = f"""
 You are a paid digital advertising strategist analyzing a DV360 campaign.
 
-Write a professional, confident report summarizing campaign performance, focusing on the **primary metric**: {primary_metric}. Also provide additional insights on the **secondary metric**: {secondary_metric}. Ensure the tone is structured, corporate, and data-driven.
+Write a structured, professional report, focusing on the **primary metric**: {primary_metric} and the **secondary metric**: {secondary_metric}.
 
-## Executive Summary:
-Summarize key performance outcomes. 
-
-## Overall Planned vs Delivered:
-Compare planned vs actual performance based on the budget, CTR target, and CPM target.
-
-## Line Item Observations:
-Analyze performance at a granular level by insertion order and line item. Identify high- and low-performing segments.
-
-## Conversion Analysis:
-Provide insights into conversion trends, cost efficiency, and optimization suggestions.
-
-## Recommendations / Strategy Updates:
-Suggest logical next steps based on the data.
-
-### **Campaign Data:**
-- Objective: {objective}
-- Budget: SGD {budget}
-- Flight: {flight}
-- **Primary Focus Metric:** {primary_metric}
-- **Secondary Metric:** {secondary_metric}
+### **Key Performance Metrics**
 - CTR Target: {ctr_target}%
 - CPM Target: SGD {cpm_target}
+- Budget: SGD {budget}
+- Flight Period: {flight}
 
-### **Overall Performance:**
-- Impressions: {total_impressions}
-- Clicks: {total_clicks}
-- CTR: {ctr}%
-- Spend: SGD {total_spend}
-- CPM: SGD {cpm}
-- CPC: SGD {cpc}
-- Conversions (Landing Page Visits): {total_conversions}
-- Conversion Rate: {conv_rate}%
-- Cost per Conversion: SGD {cost_per_conv}
+### **Overall Performance Summary**
+- Impressions: {total_impressions:,}
+- Clicks: {total_clicks:,}
+- CTR: {ctr:.2f}%
+- Spend: SGD {total_spend:,.2f}
+- CPM: SGD {cpm:,.2f}
+- CPC: SGD {cpc:,.2f}
+- Conversions: {total_conversions}
+- Conversion Rate: {conv_rate:.2f}%
+- Cost per Conversion: SGD {cost_per_conv:,.2f}
 
-{pivot_analysis}
+{pivot_analysis[:2000]}  # Limit breakdown details to avoid exceeding token limit
 
-Write in a clear, concise, and professional manner.
+Please write a concise, data-driven report, keeping each section brief and to the point.
 """
 
         # Call OpenAI API to generate insights
@@ -133,8 +114,8 @@ Write in a clear, concise, and professional manner.
         report_text = response.choices[0].message.content
         return JSONResponse(content={"report": report_text})
 
-    except Exception as e:  # ✅ Now correctly indented inside `try`
+    except Exception as e:  
         import traceback
-        error_details = traceback.format_exc()  # Get full error details
-        print("ERROR:", error_details)  # Print the error in logs
+        error_details = traceback.format_exc()  
+        print("ERROR:", error_details)  
         return JSONResponse(status_code=500, content={"error": str(e), "details": error_details})
