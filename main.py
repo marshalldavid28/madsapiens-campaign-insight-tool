@@ -61,7 +61,7 @@ async def generate_insights(
         conv_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
-        # Format line item summary for GPT (structured markdown style)
+        # Format line item summary for GPT (flush markdown format)
         line_item_summary = ""
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
@@ -76,23 +76,22 @@ async def generate_insights(
             grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
             grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Clicks']) * 100
             grouped = grouped.fillna(0)
+            grouped = grouped.sort_values(by='Spend', ascending=False)  # Sort by spend to prioritize top lines
 
             summaries = []
             for _, row in grouped.iterrows():
-                item = f"""
-- **Line Item**: {row['Line Item']} (IO: {row['Insertion Order']})
-  - Impressions: {int(row['Impressions'])}
-  - Clicks: {int(row['Clicks'])}
-  - CTR: {row['CTR (%)']:.2f}%
-  - Spend: SGD {row['Spend']:.2f}
-  - CPM: SGD {row['CPM (SGD)']:.2f}
-  - CPC: SGD {row['CPC (SGD)']:.2f}
-  - Conversions: {int(row['Total Conversions'])}
-  - Conversion Rate: {row['Conversion Rate (%)']:.2f}%
-                """
+                item = f"- **Line Item**: {row['Line Item']} (IO: {row['Insertion Order']})\n"
+                item += f"  - Impressions: {int(row['Impressions'])}\n"
+                item += f"  - Clicks: {int(row['Clicks'])}\n"
+                item += f"  - CTR: {row['CTR (%)']:.2f}%\n"
+                item += f"  - Spend: SGD {row['Spend']:.2f}\n"
+                item += f"  - CPM: SGD {row['CPM (SGD)']:.2f}\n"
+                item += f"  - CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                item += f"  - Conversions: {int(row['Total Conversions'])}\n"
+                item += f"  - Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
                 summaries.append(item)
 
-            line_item_summary = "\n".join(summaries[:10])  # limit to top 10 for now
+            line_item_summary = "\n\n" + "\n\n".join(summaries[:10]) + "\n\n--- END LINE ITEM DATA ---"  # Add header/footer markers
 
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
@@ -123,10 +122,10 @@ OVERALL PERFORMANCE:
 - Conversion Rate: {conv_rate:.2f}%
 - Cost per Conversion: SGD {cost_per_conv:,.2f}
 
-LINE ITEM DATA FOR ANALYSIS:
-Below is the actual performance for each line item. Analyze trends, highlight best and worst performers, and give useful strategic insight.
+--- BEGIN LINE ITEM DATA ---
 {line_item_summary}
 
+Please interpret the line item data above. Highlight top performers, weak spots, and strategic actions.
 Only use the data above. Do not invent metrics. Write in natural, confident first person as if I ran the campaign myself.
 """
 
