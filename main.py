@@ -1,3 +1,4 @@
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 import pandas as pd
@@ -9,6 +10,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # You can replace * with your actual domain later
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.post("/generate-insights/")
