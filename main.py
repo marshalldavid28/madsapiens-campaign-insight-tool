@@ -12,7 +12,7 @@ load_dotenv()
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can replace * with your actual domain later
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,7 +61,8 @@ async def generate_insights(
         conv_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
-        insights = []
+        # Format line item summary for GPT (structured markdown style)
+        line_item_summary = ""
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
                 'Impressions': 'sum',
@@ -76,13 +77,22 @@ async def generate_insights(
             grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Clicks']) * 100
             grouped = grouped.fillna(0)
 
+            summaries = []
             for _, row in grouped.iterrows():
-                insight = f"Line Item: {row['Line Item']}\n"
-                insight += f"- CTR: {row['CTR (%)']:.2f}% | CPM: SGD {row['CPM (SGD)']:.2f} | CPC: SGD {row['CPC (SGD)']:.2f}\n"
-                insight += f"- Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, Conversions: {int(row['Total Conversions'])}\n"
-                insights.append(insight)
+                item = f"""
+- **Line Item**: {row['Line Item']} (IO: {row['Insertion Order']})
+  - Impressions: {int(row['Impressions'])}
+  - Clicks: {int(row['Clicks'])}
+  - CTR: {row['CTR (%)']:.2f}%
+  - Spend: SGD {row['Spend']:.2f}
+  - CPM: SGD {row['CPM (SGD)']:.2f}
+  - CPC: SGD {row['CPC (SGD)']:.2f}
+  - Conversions: {int(row['Total Conversions'])}
+  - Conversion Rate: {row['Conversion Rate (%)']:.2f}%
+                """
+                summaries.append(item)
 
-        line_item_summary = "\n\n".join(insights[:10])  # limit for token space
+            line_item_summary = "\n".join(summaries[:10])  # limit to top 10 for now
 
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
@@ -91,9 +101,9 @@ Write a clear, structured, confident report in first person, using the following
 
 1. Executive Summary (top-line outcomes)
 2. Performance vs KPIs (compare against CTR/CPM targets)
-3. Line Item Breakdown (interpret the summary below, don’t just repeat numbers)
+3. Line Item Breakdown (analyze and interpret the real-world data below)
 4. Conversion Analysis
-5. Strategic Observations or Next Steps (based only on data given — 1-2 logical notes allowed)
+5. Strategic Observations or Next Steps (only using the data provided)
 
 CAMPAIGN BRIEF:
 - Objective: {objective}
@@ -113,10 +123,11 @@ OVERALL PERFORMANCE:
 - Conversion Rate: {conv_rate:.2f}%
 - Cost per Conversion: SGD {cost_per_conv:,.2f}
 
-LINE ITEM DATA SUMMARY:
+LINE ITEM DATA FOR ANALYSIS:
+Below is the actual performance for each line item. Analyze trends, highlight best and worst performers, and give useful strategic insight.
 {line_item_summary}
 
-Write in confident, natural first person as if I ran the campaign.
+Only use the data above. Do not invent metrics. Write in natural, confident first person as if I ran the campaign myself.
 """
 
         response = openai.ChatCompletion.create(
@@ -128,7 +139,6 @@ Write in confident, natural first person as if I ran the campaign.
             ]
         )
 
-        # Log full response
         print("🔍 OpenAI Response:")
         print(response)
 
