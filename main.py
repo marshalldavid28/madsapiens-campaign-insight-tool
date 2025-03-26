@@ -26,7 +26,9 @@ async def generate_insights(
     ctr_target: float = Form(...),
     cpm_target: float = Form(...),
     budget: float = Form(...),
-    flight: str = Form(...)
+    flight: str = Form(...),
+    primary_metric: str = Form(...),
+    secondary_metric: str = Form(None)
 ):
     try:
         contents = await file.read()
@@ -61,7 +63,7 @@ async def generate_insights(
         conv_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
-        # Format line item summary for GPT (flush markdown format)
+        # Format line item summary for GPT (natural language format)
         line_item_summary = ""
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
@@ -76,42 +78,45 @@ async def generate_insights(
             grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
             grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Clicks']) * 100
             grouped = grouped.fillna(0)
-            grouped = grouped.sort_values(by='Spend', ascending=False)  # Sort by spend to prioritize top lines
+            grouped = grouped.sort_values(by='Spend', ascending=False)
 
             summaries = []
             for _, row in grouped.iterrows():
-                item = f"- **Line Item**: {row['Line Item']} (IO: {row['Insertion Order']})\n"
-                item += f"  - Impressions: {int(row['Impressions'])}\n"
-                item += f"  - Clicks: {int(row['Clicks'])}\n"
-                item += f"  - CTR: {row['CTR (%)']:.2f}%\n"
-                item += f"  - Spend: SGD {row['Spend']:.2f}\n"
-                item += f"  - CPM: SGD {row['CPM (SGD)']:.2f}\n"
-                item += f"  - CPC: SGD {row['CPC (SGD)']:.2f}\n"
-                item += f"  - Conversions: {int(row['Total Conversions'])}\n"
-                item += f"  - Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+                item = f"Line Item: {row['Line Item']} (IO: {row['Insertion Order']})\n"
+                item += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
+                item += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                item += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
                 summaries.append(item)
 
-            line_item_summary = "\n\n" + "\n\n".join(summaries[:10]) + "\n\n--- END LINE ITEM DATA ---"  # Add header/footer markers
+            line_item_summary = "\n\n".join(summaries[:10])  # top 10
 
+        # Build prompt
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
 
-Write a clear, structured, confident report in first person, using the following outline:
+Your goal is to deliver a confident, data-driven, first-person performance report.  
+Use the following structure:
 
-1. Executive Summary (top-line outcomes)
-2. Performance vs KPIs (compare against CTR/CPM targets)
-3. Line Item Breakdown (analyze and interpret the real-world data below)
-4. Conversion Analysis
-5. Strategic Observations or Next Steps (only using the data provided)
+1. Executive Summary  
+2. Performance vs KPIs  
+3. Line Item Breakdown (analyze the line item data)  
+4. Conversion Analysis  
+5. Strategic Observations or Next Steps
 
-CAMPAIGN BRIEF:
+--- CAMPAIGN BRIEF ---
 - Objective: {objective}
 - CTR Target: {ctr_target}%
 - CPM Target: SGD {cpm_target}
 - Budget: SGD {budget}
 - Flight: {flight}
+- Primary Metric: {primary_metric}
+- Secondary Metric: {secondary_metric or 'None'}
 
-OVERALL PERFORMANCE:
+Please prioritize your narrative around the Primary Metric.  
+Reference the Secondary Metric where it supports insights.  
+Avoid focusing on other metrics unless clearly relevant.
+
+--- OVERALL PERFORMANCE ---
 - Impressions: {total_impressions:,}
 - Clicks: {total_clicks:,}
 - CTR: {ctr:.2f}%
@@ -122,11 +127,10 @@ OVERALL PERFORMANCE:
 - Conversion Rate: {conv_rate:.2f}%
 - Cost per Conversion: SGD {cost_per_conv:,.2f}
 
---- BEGIN LINE ITEM DATA ---
+--- LINE ITEM PERFORMANCE ---
 {line_item_summary}
 
-Please interpret the line item data above. Highlight top performers, weak spots, and strategic actions.
-Only use the data above. Do not invent metrics. Write in natural, confident first person as if I ran the campaign myself.
+Write in a structured, professional voice as though you ran the campaign yourself.
 """
 
         response = openai.ChatCompletion.create(
@@ -137,9 +141,6 @@ Only use the data above. Do not invent metrics. Write in natural, confident firs
                 {"role": "user", "content": prompt}
             ]
         )
-
-        print("🔍 OpenAI Response:")
-        print(response)
 
         report_text = response.choices[0].message.content if response.choices else "No response generated."
         return JSONResponse(content={"report": report_text})
