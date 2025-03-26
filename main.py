@@ -88,7 +88,7 @@ async def generate_insights(
                 item += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
                 summaries.append(item)
 
-            line_item_summary = "\n\n".join(summaries[:10])
+            line_item_summary = "\n\n".join(summaries[:50])
 
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
