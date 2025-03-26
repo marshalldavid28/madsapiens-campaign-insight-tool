@@ -61,7 +61,7 @@ async def generate_insights(
         ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions else 0
         cpm = round((total_spend / total_impressions) * 1000, 2) if total_impressions else 0
         cpc = round(total_spend / total_clicks, 2) if total_clicks else 0
-        conv_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks else 0
+        conv_rate = round((total_conversions / total_impressions) * 100, 2) if total_impressions else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
         line_item_summary = ""
@@ -76,7 +76,7 @@ async def generate_insights(
             grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
             grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
             grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
-            grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Clicks']) * 100
+            grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions']) * 100
             grouped = grouped.fillna(0)
             grouped = grouped.sort_values(by='Spend', ascending=False)
 
