@@ -1,6 +1,7 @@
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 import pandas as pd
 import openai
 from io import BytesIO
@@ -63,7 +64,6 @@ async def generate_insights(
         conv_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
-        # Format line item summary for GPT (natural language format)
         line_item_summary = ""
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
@@ -88,9 +88,8 @@ async def generate_insights(
                 item += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
                 summaries.append(item)
 
-            line_item_summary = "\n\n".join(summaries[:10])  # top 10
+            line_item_summary = "\n\n".join(summaries[:10])
 
-        # Build prompt
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
 
@@ -99,7 +98,7 @@ Use the following structure:
 
 1. Executive Summary  
 2. Performance vs KPIs  
-3. Line Item Breakdown (analyze the line item data)  
+3. Line Item Breakdown  
 4. Conversion Analysis  
 5. Strategic Observations or Next Steps
 
@@ -112,9 +111,8 @@ Use the following structure:
 - Primary Metric: {primary_metric}
 - Secondary Metric: {secondary_metric or 'None'}
 
-Please prioritize your narrative around the Primary Metric.  
-Reference the Secondary Metric where it supports insights.  
-Avoid focusing on other metrics unless clearly relevant.
+Focus your analysis on the Primary Metric. Only refer to the Secondary Metric where it adds value. 
+Avoid diving into unrelated metrics unless critical.
 
 --- OVERALL PERFORMANCE ---
 - Impressions: {total_impressions:,}
@@ -130,7 +128,7 @@ Avoid focusing on other metrics unless clearly relevant.
 --- LINE ITEM PERFORMANCE ---
 {line_item_summary}
 
-Write in a structured, professional voice as though you ran the campaign yourself.
+Write in a confident first-person voice.
 """
         print("\n🔍 Final Prompt Sent to GPT:\n")
         print(prompt)
@@ -146,6 +144,41 @@ Write in a structured, professional voice as though you ran the campaign yoursel
 
         report_text = response.choices[0].message.content if response.choices else "No response generated."
         return JSONResponse(content={"report": report_text})
+
+    except Exception as e:
+        import traceback
+        return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
+
+
+class InteractionRequest(BaseModel):
+    insight: str
+    user_prompt: str
+    mode: str  # "ask" or "edit"
+
+@app.post("/interact-insight/")
+async def interact_with_insight(request: InteractionRequest):
+    try:
+        instruction = (
+            "You are a paid media analyst. "
+            "If mode is 'ask', answer the user’s question using the insight text only. "
+            "If mode is 'edit', revise or improve the insight based on the user's prompt."
+        )
+
+        messages = [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": f"--- Original Insight ---\n{request.insight}"},
+            {"role": "user", "content": f"--- User Prompt ---\n{request.user_prompt}"},
+            {"role": "user", "content": f"Mode: {request.mode}"}
+        ]
+
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            temperature=0.85,
+            messages=messages
+        )
+
+        result = response.choices[0].message.content
+        return JSONResponse(content={"result": result})
 
     except Exception as e:
         import traceback
