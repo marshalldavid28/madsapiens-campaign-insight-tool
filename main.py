@@ -132,6 +132,8 @@ Avoid focusing on other metrics unless clearly relevant.
 
 Write in a structured, professional voice as though you ran the campaign yourself.
 """
+        print("\n🔍 Final Prompt Sent to GPT:\n")
+        print(prompt)
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
