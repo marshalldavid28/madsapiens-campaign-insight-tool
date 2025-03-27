@@ -19,6 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 openai.api_key = os.getenv("OPENAI_API_KEY")
+print("🔑 Loaded OpenAI API Key?", bool(openai.api_key))
 
 @app.post("/generate-insights/")
 async def generate_insights(
@@ -176,6 +177,10 @@ class InteractionRequest(BaseModel):
 @app.post("/interact-insight/")
 async def interact_with_insight(request: InteractionRequest):
     try:
+        print("📥 Chat Request Received:", request.dict())
+        print("🧠 Prompting OpenAI with:")
+        print(f"Mode: {request.mode}\nInsight: {request.insight[:300]}...\nUser Prompt: {request.user_prompt}")
+
         instruction = (
             "You are a paid media analyst. "
             "If mode is 'ask', answer the user’s question using the insight text only. "
@@ -195,7 +200,12 @@ async def interact_with_insight(request: InteractionRequest):
             messages=messages
         )
 
-        result = response.choices[0].message.content
+        if response.choices and response.choices[0].message:
+            result = response.choices[0].message.content
+        else:
+            print("⚠️ GPT returned no choices or message:", response)
+
+        print("📤 Chat Result:", result[:300])
         return JSONResponse(content={"result": result})
 
     except Exception as e:
