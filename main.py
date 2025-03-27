@@ -22,7 +22,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# OpenAI key setup
 openai.api_key = os.getenv("OPENAI_API_KEY")
 print("🔑 Loaded OpenAI API Key?", bool(openai.api_key))
 
@@ -40,8 +39,8 @@ async def generate_insights(
 ):
     try:
         t0 = time.time()
-
         contents = await file.read()
+
         if len(contents) == 0:
             return JSONResponse(status_code=400, content={"error": "Uploaded file is empty."})
 
@@ -54,20 +53,18 @@ async def generate_insights(
         if missing_columns:
             return JSONResponse(
                 status_code=400,
-                content={
-                    "error": "Dataset is missing required columns.",
-                    "missing_columns": missing_columns,
-                    "available_columns": df.columns.tolist()
-                }
+                content={"error": "Dataset is missing required columns.",
+                         "missing_columns": missing_columns,
+                         "available_columns": df.columns.tolist()}
             )
 
+        # Clean numeric columns
         if df['Spend'].dtype == 'object':
             df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
 
         df[required_columns] = df[required_columns].fillna(0)
-        df['Clicks'] = df['Clicks'].replace(0, 1)
-        df['Spend'] = df['Spend'].replace(0, 0.01)
 
+        # Aggregate Totals
         total_impressions = df['Impressions'].sum()
         total_clicks = df['Clicks'].sum()
         total_spend = df['Spend'].sum()
@@ -78,67 +75,41 @@ async def generate_insights(
         cpc = round(total_spend / total_clicks, 2) if total_clicks else 0
         conv_rate = round((total_conversions / total_impressions) * 100, 2) if total_impressions else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
-        print("✅ Calculated totals (CTR, CPM, etc.)")
 
-        # LINE ITEM SUMMARY
-        line_item_summary = ""
-        if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
-            grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
+        print("✅ Totals calculated")
+
+        def generate_group_summary(group_by, label):
+            if group_by not in df.columns:
+                return ""
+
+            grouped = df.groupby(group_by).agg({
                 'Impressions': 'sum',
                 'Clicks': 'sum',
                 'Spend': 'sum',
                 'Total Conversions': 'sum'
             }).reset_index()
 
-            grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
-            grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
-            grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
-            grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions']) * 100
+            grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions'].replace(0, pd.NA)) * 100
+            grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions'].replace(0, pd.NA)) * 1000
+            grouped['CPC (SGD)'] = grouped.apply(lambda x: x['Spend'] / x['Clicks'] if x['Clicks'] else 0, axis=1)
+            grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions'].replace(0, pd.NA)) * 100
             grouped = grouped.fillna(0).sort_values(by='Spend', ascending=False).head(5)
 
             summaries = []
             for _, row in grouped.iterrows():
-                item = f"Line Item: {row['Line Item']} (IO: {row['Insertion Order']})\n"
-                item += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
-                item += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
-                item += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
-                summaries.append(item)
-            line_item_summary = "\n\n".join(summaries)
-        print("✅ Line item summary complete")
+                summaries.append(
+                    f"{label}: {row[group_by]}\n"
+                    f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
+                    f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                    f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+                )
+            return "\n\n".join(summaries)
 
-        # HELPER for GROUP SUMMARIES
-        def build_group_summary(df, group_by_col, label):
-            summary_text = ""
-            if group_by_col in df.columns:
-                grouped = df.groupby(group_by_col).agg({
-                    'Impressions': 'sum',
-                    'Clicks': 'sum',
-                    'Spend': 'sum',
-                    'Total Conversions': 'sum'
-                }).reset_index()
-
-                grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
-                grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
-                grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
-                grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions']) * 100
-                grouped = grouped.fillna(0).sort_values(by='Spend', ascending=False).head(5)
-
-                parts = []
-                for _, row in grouped.iterrows():
-                    summary = f"{label}: {row[group_by_col]}\n"
-                    summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
-                    summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
-                    summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
-                    parts.append(summary)
-                summary_text = "\n\n".join(parts)
-            return summary_text
-
-        creative_summary = build_group_summary(df, "Creative", "Creative")
-        print("✅ Creative summary complete")
-        device_summary = build_group_summary(df, "Device Type", "Device Type")
-        print("✅ Device summary complete")
-        os_summary = build_group_summary(df, "Device Model", "Device Model")
-        print("✅ OS summary complete")
+        line_item_summary = generate_group_summary("Line Item", "Line Item")
+        creative_summary = generate_group_summary("Creative", "Creative")
+        device_summary = generate_group_summary("Device Type", "Device Type")
+        os_summary = generate_group_summary("Device Model", "Device Model")
+        print("✅ All summaries generated")
 
         # FINAL PROMPT
         prompt = f"""
@@ -148,40 +119,43 @@ Your goal is to deliver a confident, data-driven, first-person performance repor
 
 ### STRUCTURE OF YOUR REPORT
 
-You must use the following format, including the headings exactly as shown:
+Use the following sections and structure your insights accordingly:
 
 ## Executive Summary  
-Summarize the overall results clearly. No need to mention targets here yet — just highlight standout results, surprises, and key wins/losses.
+Summarize results. Don’t list metrics — highlight key wins, surprises, or inefficiencies.
 
 ## Performance vs KPIs  
-Discuss how we performed against CTR and CPM targets. Include insights into why those numbers might have occurred — was it audience, placement, creative, timing?
+Explain how the campaign did against CTR and CPM targets. Provide strategic hypotheses behind performance, not just facts.
 
 ## Line Item Breakdown  
-Analyze each top-spending line item (these are provided below).  
-→ Instead of repeating long line item names, infer the **audience or intent** from the name. For example, "ViewQwest_Residential_Branding_Lifestyle_Android" might be summarized as "Lifestyle-oriented Android audiences".  
-→ Compare segments (e.g. lifestyle vs. remarketing, Android vs. iOS)  
-→ Highlight strategic takeaways. Always ask: **“So what?”** — Why did this perform or underperform? What does that tell us?
+Comment on audience targeting performance using the line item names provided below. Group and simplify — e.g. "Lifestyle Android users" or "Remarketing iOS". Focus on insights, not listing.
 
 ## Creative Performance  
-Evaluate the top creatives based on CTR and engagement.  
-→ Identify which ones worked and **why** (e.g. static vs animated, product vs lifestyle)  
-→ Avoid just repeating creative filenames — try to interpret them as a strategist would
+Highlight top creatives and infer *why* they performed well — static vs video, product vs lifestyle.
 
 ## Device & OS Analysis  
-Discuss differences in performance between smartphones, tablets, desktops.  
-→ Mention if one device type dominated  
-→ If “Unknown” shows up, mention it tactfully and suggest we improve tracking or segmentation
+Compare performance across smartphones, tablets, desktops. Mention if anything underperformed or needs attention (e.g., "Unknown" models).
 
 ## Conversion Analysis  
-Was the campaign efficient in converting users?  
-→ Mention conversion volume, rate, and cost per conversion  
-→ Call out anything that stands out — high conversions from low CTR? Or vice versa?
+Discuss conversion volume, cost per conversion, and efficiency. Relate back to specific audiences or creatives if possible.
 
 ## Strategic Observations & Recommendations  
-End with forward-looking thoughts:  
-→ What would you try next time?  
-→ Which audiences or creatives to double down on?  
-→ Any tracking, device targeting, or bid strategy changes you’d suggest?
+End with takeaways and what you would do differently next time. Be bold and helpful.
+
+Some notes for you to keep in mind about best practices of writing insights:
+
+1. Use clear and concise language: Avoid using technical jargon or complex marketing terminology that may confuse your clients. Instead, use simple, easy-to-understand language to explain your findings.
+2. Focus on key metrics: Identify the most important metrics that matter to your clients and focus on those in your reports. This will help them quickly grasp the value of their online campaigns.
+3. Focus on achievements: Highlight the achievements and successes of your clients’ online campaigns, rather than just reporting on metrics.
+4. Be transparent about challenges: If your clients’ online campaigns are not performing as expected, be transparent about the challenges and provide recommendations for improvement.
+5. When you analyse the line items provided to you, read the name of the line items and try to understand what audience segment is being targeted. Use that to form your insights instead of writing out the whole line item name all the time, which can be long and hard to read.
+6. Campaign analytics provides granular insights into audience behavior, preferences, and engagement. 
+7. By understanding which segments respond best to certain messages or channels, marketers can tailor their campaigns with precision, ensuring that the right message reaches the right audience at the optimal time.
+8. With finite resources, it's essential to ensure that every marketing dollar is well-spent. Insights should help identify high-performing campaigns and those that might need reevaluation. 
+9. This ensures that marketing budgets are allocated to campaigns that deliver the best results
+10. While you do need to follow the primary and secondary metrics and the logic given to you below in this prompt, I dont want you to mention them as primary metric and secondary metric in your insights. Be natural about it.
+11. Dont use sentences like "I am proud to announce" or "Im pleases to say that" - This should not be like a speech. It's a commentary, written professionally. 
+12. Avoid the approach where data is explained but no reasoning is given - always try and offer up some reason as to why something happened. The question of "so what?" should be answered. Audience A performed with a highest CTR - So what? Try and offer explanations in that regrd wherever possible. Dont force-fit, but try and look for aveneues to fill in that gap wherever relevant.
 
 ---
 
@@ -223,9 +197,6 @@ End with forward-looking thoughts:
 
 {os_summary}
 """
- 
-
-        print("✅ Prompt built. Time so far:", round(time.time() - t0, 2), "seconds")
         print("🔍 Final Prompt Sent to GPT (truncated):\n", prompt[:500])
 
         response = openai.ChatCompletion.create(
@@ -249,7 +220,7 @@ End with forward-looking thoughts:
 class InteractionRequest(BaseModel):
     insight: str
     user_prompt: str
-    mode: str
+    mode: str  # "ask" or "edit"
 
 @app.post("/interact-insight/")
 async def interact_with_insight(request: InteractionRequest):
