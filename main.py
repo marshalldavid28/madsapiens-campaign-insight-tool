@@ -98,9 +98,22 @@ Use the following structure:
 
 1. Executive Summary  
 2. Performance vs KPIs  
-3. Line Item Breakdown  
+3. Line Item Breakdown - When you analyse the line items provided to you, read the name of the line items and try to understand what audience segment is being targeted. Use that to form your insights instead of writing out the whole line item name all the time, which can be long and hard to read.
 4. Conversion Analysis  
 5. Strategic Observations or Next Steps
+
+Some notes for you to keep in mind about best practices of writing insights:
+
+1. Use clear and concise language: Avoid using technical jargon or complex marketing terminology that may confuse your clients. Instead, use simple, easy-to-understand language to explain your findings.
+2. Focus on key metrics: Identify the most important metrics that matter to your clients and focus on those in your reports. This will help them quickly grasp the value of their online campaigns.
+3. Focus on achievements: Highlight the achievements and successes of your clients’ online campaigns, rather than just reporting on metrics.
+4. Be transparent about challenges: If your clients’ online campaigns are not performing as expected, be transparent about the challenges and provide recommendations for improvement.
+5. When you analyse the line items provided to you, read the name of the line items and try to understand what audience segment is being targeted. Use that to form your insights instead of writing out the whole line item name all the time, which can be long and hard to read.
+6. Campaign analytics provides granular insights into audience behavior, preferences, and engagement. 
+7. By understanding which segments respond best to certain messages or channels, marketers can tailor their campaigns with precision, ensuring that the right message reaches the right audience at the optimal time.
+8. With finite resources, it's essential to ensure that every marketing dollar is well-spent. Insights should help identify high-performing campaigns and those that might need reevaluation. 
+9. This ensures that marketing budgets are allocated to campaigns that deliver the best results
+
 
 --- CAMPAIGN BRIEF ---
 - Objective: {objective}
