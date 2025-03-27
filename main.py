@@ -243,9 +243,10 @@ async def interact_with_insight(request: InteractionRequest):
         ]
 
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             temperature=0.85,
             messages=messages
+            print("🤖 Using GPT-3.5 for chat interaction")
         )
 
         result = response.choices[0].message.content if response.choices else "⚠️ No response from OpenAI."
