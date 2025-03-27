@@ -98,7 +98,9 @@ Use the following structure:
 
 1. Executive Summary  
 2. Performance vs KPIs  
-3. Line Item Breakdown - When you analyse the line items provided to you, read the name of the line items and try to understand what audience segment is being targeted. Use that to form your insights instead of writing out the whole line item name all the time, which can be long and hard to read.
+3. Line Item Breakdown: 
+    3a. When you analyse the line items provided to you, read the name of the line items and try to understand what audience segment is being targeted. Use that to form your insights instead of writing out the whole line item name all the time, which can be long and hard to read.
+    3b. Try and spend more time on this section. For example, if you notice a certain audience segment + location + OS performed really well, comment on all of that (wherever relevant). Speak about the OS also, for example in this instance. Add some general thoughts about why this segment or that particular attribute of the audience resonated well with the brand.
 4. Conversion Analysis  
 5. Strategic Observations or Next Steps
 
@@ -113,6 +115,9 @@ Some notes for you to keep in mind about best practices of writing insights:
 7. By understanding which segments respond best to certain messages or channels, marketers can tailor their campaigns with precision, ensuring that the right message reaches the right audience at the optimal time.
 8. With finite resources, it's essential to ensure that every marketing dollar is well-spent. Insights should help identify high-performing campaigns and those that might need reevaluation. 
 9. This ensures that marketing budgets are allocated to campaigns that deliver the best results
+10. While you do need to follow the primary and secondary metrics and the logic given to you below in this prompt, I dont want you to mention them as primary metric and secondary metric in your insights. Be natural about it.
+11. Dont use sentences like "I am proud to announce" or "Im pleases to say that" - This should not be like a speech. It's a commentary, written professionally. 
+12. Avoid the approach where data is explained but no reasoning is given - always try and offer up some reason as to why something happened. The question of "so what?" should be answered. Audience A performed with a highest CTR - So what? Try and offer explanations in that regrd wherever possible. Dont force-fit, but try and look for aveneues to fill in that gap wherever relevant.
 
 
 --- CAMPAIGN BRIEF ---
