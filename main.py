@@ -1,26 +1,4 @@
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-import pandas as pd
-import openai
-from io import BytesIO
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
-print("🔑 Loaded OpenAI API Key?", bool(openai.api_key))
+# ... [imports and app setup remain unchanged]
 
 @app.post("/generate-insights/")
 async def generate_insights(
@@ -34,11 +12,16 @@ async def generate_insights(
     secondary_metric: str = Form(None)
 ):
     try:
+        import time
+        t0 = time.time()
+
         contents = await file.read()
         if len(contents) == 0:
             return JSONResponse(status_code=400, content={"error": "Uploaded file is empty."})
 
         df = pd.read_excel(BytesIO(contents))
+        print("✅ Loaded DataFrame")
+        print("📊 Columns:", df.columns.tolist())
 
         required_columns = ['Impressions', 'Clicks', 'Spend', 'Total Conversions']
         missing_columns = [col for col in required_columns if col not in df.columns]
@@ -55,6 +38,10 @@ async def generate_insights(
         if df['Spend'].dtype == 'object':
             df['Spend'] = df['Spend'].str.replace('S$', '', regex=False).astype(float)
 
+        df[required_columns] = df[required_columns].fillna(0)
+        df['Clicks'] = df['Clicks'].replace(0, 1)
+        df['Spend'] = df['Spend'].replace(0, 0.01)
+
         total_impressions = df['Impressions'].sum()
         total_clicks = df['Clicks'].sum()
         total_spend = df['Spend'].sum()
@@ -65,8 +52,9 @@ async def generate_insights(
         cpc = round(total_spend / total_clicks, 2) if total_clicks else 0
         conv_rate = round((total_conversions / total_impressions) * 100, 2) if total_impressions else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
+        print("✅ Calculated totals (CTR, CPM, etc.)")
 
-        # --- LINE ITEM PERFORMANCE ---
+        # --- LINE ITEM SUMMARY ---
         line_item_summary = ""
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
@@ -80,8 +68,7 @@ async def generate_insights(
             grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
             grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
             grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions']) * 100
-            grouped = grouped.fillna(0)
-            grouped = grouped.sort_values(by='Spend', ascending=False)
+            grouped = grouped.fillna(0).sort_values(by='Spend', ascending=False).head(5)
 
             summaries = []
             for _, row in grouped.iterrows():
@@ -91,94 +78,46 @@ async def generate_insights(
                 item += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
                 summaries.append(item)
             line_item_summary = "\n\n".join(summaries)
+        print("✅ Line item summary complete")
 
-        # --- CREATIVE PERFORMANCE ---
-        creative_summary = ""
-        if 'Creative' in df.columns:
-            creative_grouped = df.groupby('Creative').agg({
-                'Impressions': 'sum',
-                'Clicks': 'sum',
-                'Spend': 'sum',
-                'Total Conversions': 'sum'
-            }).reset_index()
-            creative_grouped['CTR (%)'] = (creative_grouped['Clicks'] / creative_grouped['Impressions']) * 100
-            creative_grouped['CPM (SGD)'] = (creative_grouped['Spend'] / creative_grouped['Impressions']) * 1000
-            creative_grouped['CPC (SGD)'] = creative_grouped['Spend'] / creative_grouped['Clicks']
-            creative_grouped['Conversion Rate (%)'] = (creative_grouped['Total Conversions'] / creative_grouped['Impressions']) * 100
-            creative_grouped = creative_grouped.fillna(0)
+        def build_group_summary(df, group_by_col, label):
+            summary_text = ""
+            if group_by_col in df.columns:
+                grouped = df.groupby(group_by_col).agg({
+                    'Impressions': 'sum',
+                    'Clicks': 'sum',
+                    'Spend': 'sum',
+                    'Total Conversions': 'sum'
+                }).reset_index()
 
-            creative_summaries = []
-            for _, row in creative_grouped.iterrows():
-                summary = f"Creative: {row['Creative']}\n"
-                summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
-                summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
-                summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
-                creative_summaries.append(summary)
-            creative_summary = "\n\n".join(creative_summaries)
+                grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
+                grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
+                grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
+                grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions']) * 100
+                grouped = grouped.fillna(0).sort_values(by='Spend', ascending=False).head(5)
 
-        # --- DEVICE PERFORMANCE ---
-        device_summary = ""
-        if 'Device Type' in df.columns:
-            device_grouped = df.groupby('Device Type').agg({
-                'Impressions': 'sum',
-                'Clicks': 'sum',
-                'Spend': 'sum',
-                'Total Conversions': 'sum'
-            }).reset_index()
-            device_grouped['CTR (%)'] = (device_grouped['Clicks'] / device_grouped['Impressions']) * 100
-            device_grouped['CPM (SGD)'] = (device_grouped['Spend'] / device_grouped['Impressions']) * 1000
-            device_grouped['CPC (SGD)'] = device_grouped['Spend'] / device_grouped['Clicks']
-            device_grouped['Conversion Rate (%)'] = (device_grouped['Total Conversions'] / device_grouped['Impressions']) * 100
-            device_grouped = device_grouped.fillna(0)
+                parts = []
+                for _, row in grouped.iterrows():
+                    summary = f"{label}: {row[group_by_col]}\n"
+                    summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
+                    summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                    summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+                    parts.append(summary)
+                summary_text = "\n\n".join(parts)
+            return summary_text
 
-            device_summaries = []
-            for _, row in device_grouped.iterrows():
-                summary = f"Device Type: {row['Device Type']}\n"
-                summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
-                summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
-                summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
-                device_summaries.append(summary)
-            device_summary = "\n\n".join(device_summaries)
+        creative_summary = build_group_summary(df, "Creative", "Creative")
+        print("✅ Creative summary complete")
+        device_summary = build_group_summary(df, "Device Type", "Device Type")
+        print("✅ Device summary complete")
+        os_summary = build_group_summary(df, "Device Model", "Device Model")
+        print("✅ OS summary complete")
 
-        # --- OS PERFORMANCE ---
-        os_summary = ""
-        if 'Device Model' in df.columns:
-            os_grouped = df.groupby('Device Model').agg({
-                'Impressions': 'sum',
-                'Clicks': 'sum',
-                'Spend': 'sum',
-                'Total Conversions': 'sum'
-            }).reset_index()
-            os_grouped['CTR (%)'] = (os_grouped['Clicks'] / os_grouped['Impressions']) * 100
-            os_grouped['CPM (SGD)'] = (os_grouped['Spend'] / os_grouped['Impressions']) * 1000
-            os_grouped['CPC (SGD)'] = os_grouped['Spend'] / os_grouped['Clicks']
-            os_grouped['Conversion Rate (%)'] = (os_grouped['Total Conversions'] / os_grouped['Impressions']) * 100
-            os_grouped = os_grouped.fillna(0)
-
-            os_summaries = []
-            for _, row in os_grouped.iterrows():
-                summary = f"Device Model: {row['Device Model']}\n"
-                summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
-                summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
-                summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
-                os_summaries.append(summary)
-            os_summary = "\n\n".join(os_summaries)
-
-        # --- FINAL PROMPT ---
+        # FINAL PROMPT
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
 
-Your goal is to deliver a confident, data-driven, first-person performance report.  
-Use the following structure:
-
-1. Executive Summary  
-2. Performance vs KPIs  
-3. Line Item Breakdown  
-4. Creative Performance  
-5. Device Breakdown  
-6. OS Analysis  
-7. Conversion Analysis  
-8. Strategic Observations or Next Steps
+Your goal is to deliver a confident, data-driven, first-person performance report.
 
 --- CAMPAIGN BRIEF ---
 - Objective: {objective}
@@ -212,10 +151,10 @@ Use the following structure:
 --- OS PERFORMANCE ---
 {os_summary}
 
-Write this as if you’re a confident media strategist providing commentary and actionable insights.
+Write this in the voice of a confident campaign strategist. Prioritize clarity and insight.
 """
-        print("\n🔍 Final Prompt Sent to GPT:\n")
-        print(prompt[:1000])  # Don't print full for safety
+        print("✅ Prompt built. Time so far:", round(time.time() - t0, 2), "seconds")
+        print("🔍 Final Prompt Sent to GPT (truncated):\n", prompt[:500])
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -264,11 +203,7 @@ async def interact_with_insight(request: InteractionRequest):
             messages=messages
         )
 
-        if response.choices and response.choices[0].message:
-            result = response.choices[0].message.content
-        else:
-            result = "⚠️ No response from OpenAI."
-
+        result = response.choices[0].message.content if response.choices else "⚠️ No response from OpenAI."
         print("📤 Chat Result:", result[:300])
         return JSONResponse(content={"result": result})
 
