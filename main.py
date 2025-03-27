@@ -144,42 +144,87 @@ async def generate_insights(
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
 
-Your goal is to deliver a confident, data-driven, first-person performance report.
+Your goal is to deliver a confident, data-driven, first-person performance report. You must sound like a human strategist who understands what the data means — not just repeat it. You are writing a commentary, not giving a speech.
 
---- CAMPAIGN BRIEF ---
-- Objective: {objective}
-- CTR Target: {ctr_target}%
-- CPM Target: SGD {cpm_target}
-- Budget: SGD {budget}
-- Flight: {flight}
-- Primary Metric: {primary_metric}
+### STRUCTURE OF YOUR REPORT
+
+You must use the following format, including the headings exactly as shown:
+
+## Executive Summary  
+Summarize the overall results clearly. No need to mention targets here yet — just highlight standout results, surprises, and key wins/losses.
+
+## Performance vs KPIs  
+Discuss how we performed against CTR and CPM targets. Include insights into why those numbers might have occurred — was it audience, placement, creative, timing?
+
+## Line Item Breakdown  
+Analyze each top-spending line item (these are provided below).  
+→ Instead of repeating long line item names, infer the **audience or intent** from the name. For example, "ViewQwest_Residential_Branding_Lifestyle_Android" might be summarized as "Lifestyle-oriented Android audiences".  
+→ Compare segments (e.g. lifestyle vs. remarketing, Android vs. iOS)  
+→ Highlight strategic takeaways. Always ask: **“So what?”** — Why did this perform or underperform? What does that tell us?
+
+## Creative Performance  
+Evaluate the top creatives based on CTR and engagement.  
+→ Identify which ones worked and **why** (e.g. static vs animated, product vs lifestyle)  
+→ Avoid just repeating creative filenames — try to interpret them as a strategist would
+
+## Device & OS Analysis  
+Discuss differences in performance between smartphones, tablets, desktops.  
+→ Mention if one device type dominated  
+→ If “Unknown” shows up, mention it tactfully and suggest we improve tracking or segmentation
+
+## Conversion Analysis  
+Was the campaign efficient in converting users?  
+→ Mention conversion volume, rate, and cost per conversion  
+→ Call out anything that stands out — high conversions from low CTR? Or vice versa?
+
+## Strategic Observations & Recommendations  
+End with forward-looking thoughts:  
+→ What would you try next time?  
+→ Which audiences or creatives to double down on?  
+→ Any tracking, device targeting, or bid strategy changes you’d suggest?
+
+---
+
+## CAMPAIGN BRIEF
+
+- Objective: {objective}  
+- CTR Target: {ctr_target}%  
+- CPM Target: SGD {cpm_target}  
+- Budget: SGD {budget}  
+- Flight: {flight}  
+- Primary Metric: {primary_metric}  
 - Secondary Metric: {secondary_metric or 'None'}
 
---- OVERALL PERFORMANCE ---
-- Impressions: {total_impressions:,}
-- Clicks: {total_clicks:,}
-- CTR: {ctr:.2f}%
-- Spend: SGD {total_spend:,.2f}
-- CPM: SGD {cpm:,.2f}
-- CPC: SGD {cpc:,.2f}
-- Conversions: {total_conversions:,}
-- Conversion Rate: {conv_rate:.2f}%
+## OVERALL PERFORMANCE
+
+- Impressions: {total_impressions:,}  
+- Clicks: {total_clicks:,}  
+- CTR: {ctr:.2f}%  
+- Spend: SGD {total_spend:,.2f}  
+- CPM: SGD {cpm:,.2f}  
+- CPC: SGD {cpc:,.2f}  
+- Conversions: {total_conversions:,}  
+- Conversion Rate: {conv_rate:.2f}%  
 - Cost per Conversion: SGD {cost_per_conv:,.2f}
 
---- LINE ITEM PERFORMANCE ---
+## TOP LINE ITEM PERFORMANCE
+
 {line_item_summary}
 
---- CREATIVE PERFORMANCE ---
+## TOP CREATIVES
+
 {creative_summary}
 
---- DEVICE PERFORMANCE ---
+## DEVICE PERFORMANCE
+
 {device_summary}
 
---- OS PERFORMANCE ---
-{os_summary}
+## OS PERFORMANCE
 
-Write this in the voice of a confident campaign strategist. Prioritize clarity and insight.
+{os_summary}
 """
+ 
+
         print("✅ Prompt built. Time so far:", round(time.time() - t0, 2), "seconds")
         print("🔍 Final Prompt Sent to GPT (truncated):\n", prompt[:500])
 
