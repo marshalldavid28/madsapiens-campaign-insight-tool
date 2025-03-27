@@ -18,6 +18,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 openai.api_key = os.getenv("OPENAI_API_KEY")
 print("🔑 Loaded OpenAI API Key?", bool(openai.api_key))
 
@@ -65,6 +66,7 @@ async def generate_insights(
         conv_rate = round((total_conversions / total_impressions) * 100, 2) if total_impressions else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
+        # --- LINE ITEM PERFORMANCE ---
         line_item_summary = ""
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
@@ -88,9 +90,81 @@ async def generate_insights(
                 item += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
                 item += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
                 summaries.append(item)
-
             line_item_summary = "\n\n".join(summaries)
 
+        # --- CREATIVE PERFORMANCE ---
+        creative_summary = ""
+        if 'Creative' in df.columns:
+            creative_grouped = df.groupby('Creative').agg({
+                'Impressions': 'sum',
+                'Clicks': 'sum',
+                'Spend': 'sum',
+                'Total Conversions': 'sum'
+            }).reset_index()
+            creative_grouped['CTR (%)'] = (creative_grouped['Clicks'] / creative_grouped['Impressions']) * 100
+            creative_grouped['CPM (SGD)'] = (creative_grouped['Spend'] / creative_grouped['Impressions']) * 1000
+            creative_grouped['CPC (SGD)'] = creative_grouped['Spend'] / creative_grouped['Clicks']
+            creative_grouped['Conversion Rate (%)'] = (creative_grouped['Total Conversions'] / creative_grouped['Impressions']) * 100
+            creative_grouped = creative_grouped.fillna(0)
+
+            creative_summaries = []
+            for _, row in creative_grouped.iterrows():
+                summary = f"Creative: {row['Creative']}\n"
+                summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
+                summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+                creative_summaries.append(summary)
+            creative_summary = "\n\n".join(creative_summaries)
+
+        # --- DEVICE PERFORMANCE ---
+        device_summary = ""
+        if 'Device Type' in df.columns:
+            device_grouped = df.groupby('Device Type').agg({
+                'Impressions': 'sum',
+                'Clicks': 'sum',
+                'Spend': 'sum',
+                'Total Conversions': 'sum'
+            }).reset_index()
+            device_grouped['CTR (%)'] = (device_grouped['Clicks'] / device_grouped['Impressions']) * 100
+            device_grouped['CPM (SGD)'] = (device_grouped['Spend'] / device_grouped['Impressions']) * 1000
+            device_grouped['CPC (SGD)'] = device_grouped['Spend'] / device_grouped['Clicks']
+            device_grouped['Conversion Rate (%)'] = (device_grouped['Total Conversions'] / device_grouped['Impressions']) * 100
+            device_grouped = device_grouped.fillna(0)
+
+            device_summaries = []
+            for _, row in device_grouped.iterrows():
+                summary = f"Device Type: {row['Device Type']}\n"
+                summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
+                summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+                device_summaries.append(summary)
+            device_summary = "\n\n".join(device_summaries)
+
+        # --- OS PERFORMANCE ---
+        os_summary = ""
+        if 'Device Model' in df.columns:
+            os_grouped = df.groupby('Device Model').agg({
+                'Impressions': 'sum',
+                'Clicks': 'sum',
+                'Spend': 'sum',
+                'Total Conversions': 'sum'
+            }).reset_index()
+            os_grouped['CTR (%)'] = (os_grouped['Clicks'] / os_grouped['Impressions']) * 100
+            os_grouped['CPM (SGD)'] = (os_grouped['Spend'] / os_grouped['Impressions']) * 1000
+            os_grouped['CPC (SGD)'] = os_grouped['Spend'] / os_grouped['Clicks']
+            os_grouped['Conversion Rate (%)'] = (os_grouped['Total Conversions'] / os_grouped['Impressions']) * 100
+            os_grouped = os_grouped.fillna(0)
+
+            os_summaries = []
+            for _, row in os_grouped.iterrows():
+                summary = f"Device Model: {row['Device Model']}\n"
+                summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
+                summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+                summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+                os_summaries.append(summary)
+            os_summary = "\n\n".join(os_summaries)
+
+        # --- FINAL PROMPT ---
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 campaign.
 
@@ -99,27 +173,12 @@ Use the following structure:
 
 1. Executive Summary  
 2. Performance vs KPIs  
-3. Line Item Breakdown: 
-    3a. When you analyse the line items provided to you, read the name of the line items and try to understand what audience segment is being targeted. Use that to form your insights instead of writing out the whole line item name all the time, which can be long and hard to read.
-    3b. Try and spend more time on this section. For example, if you notice a certain audience segment + location + OS performed really well, comment on all of that (wherever relevant). Speak about the OS also, for example in this instance. Add some general thoughts about why this segment or that particular attribute of the audience resonated well with the brand.
-4. Conversion Analysis  
-5. Strategic Observations or Next Steps
-
-Some notes for you to keep in mind about best practices of writing insights:
-
-1. Use clear and concise language: Avoid using technical jargon or complex marketing terminology that may confuse your clients. Instead, use simple, easy-to-understand language to explain your findings.
-2. Focus on key metrics: Identify the most important metrics that matter to your clients and focus on those in your reports. This will help them quickly grasp the value of their online campaigns.
-3. Focus on achievements: Highlight the achievements and successes of your clients’ online campaigns, rather than just reporting on metrics.
-4. Be transparent about challenges: If your clients’ online campaigns are not performing as expected, be transparent about the challenges and provide recommendations for improvement.
-5. When you analyse the line items provided to you, read the name of the line items and try to understand what audience segment is being targeted. Use that to form your insights instead of writing out the whole line item name all the time, which can be long and hard to read.
-6. Campaign analytics provides granular insights into audience behavior, preferences, and engagement. 
-7. By understanding which segments respond best to certain messages or channels, marketers can tailor their campaigns with precision, ensuring that the right message reaches the right audience at the optimal time.
-8. With finite resources, it's essential to ensure that every marketing dollar is well-spent. Insights should help identify high-performing campaigns and those that might need reevaluation. 
-9. This ensures that marketing budgets are allocated to campaigns that deliver the best results
-10. While you do need to follow the primary and secondary metrics and the logic given to you below in this prompt, I dont want you to mention them as primary metric and secondary metric in your insights. Be natural about it.
-11. Dont use sentences like "I am proud to announce" or "Im pleases to say that" - This should not be like a speech. It's a commentary, written professionally. 
-12. Avoid the approach where data is explained but no reasoning is given - always try and offer up some reason as to why something happened. The question of "so what?" should be answered. Audience A performed with a highest CTR - So what? Try and offer explanations in that regrd wherever possible. Dont force-fit, but try and look for aveneues to fill in that gap wherever relevant.
-
+3. Line Item Breakdown  
+4. Creative Performance  
+5. Device Breakdown  
+6. OS Analysis  
+7. Conversion Analysis  
+8. Strategic Observations or Next Steps
 
 --- CAMPAIGN BRIEF ---
 - Objective: {objective}
@@ -129,9 +188,6 @@ Some notes for you to keep in mind about best practices of writing insights:
 - Flight: {flight}
 - Primary Metric: {primary_metric}
 - Secondary Metric: {secondary_metric or 'None'}
-
-Focus your analysis on the Primary Metric. Only refer to the Secondary Metric where it adds value. 
-Avoid diving into unrelated metrics unless critical.
 
 --- OVERALL PERFORMANCE ---
 - Impressions: {total_impressions:,}
@@ -147,10 +203,19 @@ Avoid diving into unrelated metrics unless critical.
 --- LINE ITEM PERFORMANCE ---
 {line_item_summary}
 
-Write in a confident first-person voice.
+--- CREATIVE PERFORMANCE ---
+{creative_summary}
+
+--- DEVICE PERFORMANCE ---
+{device_summary}
+
+--- OS PERFORMANCE ---
+{os_summary}
+
+Write this as if you’re a confident media strategist providing commentary and actionable insights.
 """
         print("\n🔍 Final Prompt Sent to GPT:\n")
-        print(prompt)
+        print(prompt[:1000])  # Don't print full for safety
 
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -168,11 +233,10 @@ Write in a confident first-person voice.
         import traceback
         return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
 
-
 class InteractionRequest(BaseModel):
     insight: str
     user_prompt: str
-    mode: str  # "ask" or "edit"
+    mode: str
 
 @app.post("/interact-insight/")
 async def interact_with_insight(request: InteractionRequest):
@@ -203,7 +267,7 @@ async def interact_with_insight(request: InteractionRequest):
         if response.choices and response.choices[0].message:
             result = response.choices[0].message.content
         else:
-            print("⚠️ GPT returned no choices or message:", response)
+            result = "⚠️ No response from OpenAI."
 
         print("📤 Chat Result:", result[:300])
         return JSONResponse(content={"result": result})
