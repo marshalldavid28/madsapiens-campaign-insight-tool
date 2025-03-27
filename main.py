@@ -1,5 +1,32 @@
-# ... [imports and app setup remain unchanged]
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+import pandas as pd
+import openai
+from io import BytesIO
+import os
+from dotenv import load_dotenv
+import time
 
+# Load .env and setup FastAPI
+load_dotenv()
+app = FastAPI()
+
+# CORS setup
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# OpenAI key setup
+openai.api_key = os.getenv("OPENAI_API_KEY")
+print("🔑 Loaded OpenAI API Key?", bool(openai.api_key))
+
+# ---------- MAIN INSIGHT ENDPOINT ----------
 @app.post("/generate-insights/")
 async def generate_insights(
     file: UploadFile = File(...),
@@ -12,7 +39,6 @@ async def generate_insights(
     secondary_metric: str = Form(None)
 ):
     try:
-        import time
         t0 = time.time()
 
         contents = await file.read()
@@ -54,7 +80,7 @@ async def generate_insights(
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
         print("✅ Calculated totals (CTR, CPM, etc.)")
 
-        # --- LINE ITEM SUMMARY ---
+        # LINE ITEM SUMMARY
         line_item_summary = ""
         if 'Insertion Order' in df.columns and 'Line Item' in df.columns:
             grouped = df.groupby(['Insertion Order', 'Line Item']).agg({
@@ -80,6 +106,7 @@ async def generate_insights(
             line_item_summary = "\n\n".join(summaries)
         print("✅ Line item summary complete")
 
+        # HELPER for GROUP SUMMARIES
         def build_group_summary(df, group_by_col, label):
             summary_text = ""
             if group_by_col in df.columns:
@@ -172,6 +199,8 @@ Write this in the voice of a confident campaign strategist. Prioritize clarity a
         import traceback
         return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
 
+
+# ---------- CHAT INTERACT ENDPOINT ----------
 class InteractionRequest(BaseModel):
     insight: str
     user_prompt: str
