@@ -7,14 +7,12 @@ import openai
 from io import BytesIO
 import os
 from dotenv import load_dotenv
-import traceback
 import time
 
-# Load environment variables
+# ========== Setup ==========
 load_dotenv()
 app = FastAPI()
 
-# CORS setup
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,24 +22,12 @@ app.add_middleware(
 )
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
-print("🔑 Loaded OpenAI API Key?", bool(openai.api_key))
+print("🔑 OpenAI Key Loaded?", bool(openai.api_key))
 
-# ========== Helpers ==========
-
-def safe_ratio(numerator, denominator):
-    return round((numerator / denominator) * 100, 2) if denominator else 0
-
-def build_group_summary(df, group_by_col, label):
-    if group_by_col not in df.columns:
-        return ""
-
-    if df[group_by_col].nunique() > 25:
-        return ""  # too many rows
-
-    if df['Impressions'].sum() < 1000:
-        return ""  # too little data
-
-    grouped = df.groupby(group_by_col).agg({
+# ========== Helper Functions ==========
+def build_group_summary(df, col):
+    df[col] = df[col].fillna("Unknown")
+    grouped = df.groupby(col).agg({
         'Impressions': 'sum',
         'Clicks': 'sum',
         'Spend': 'sum',
@@ -52,18 +38,20 @@ def build_group_summary(df, group_by_col, label):
     grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
     grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
     grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions']) * 100
-    grouped = grouped.fillna(0).sort_values(by='Spend', ascending=False).head(5)
+    grouped = grouped.fillna(0).sort_values(by='Spend', ascending=False)
 
-    parts = []
+    summaries = []
     for _, row in grouped.iterrows():
-        summary = f"{label}: {row[group_by_col]}\n"
-        summary += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
-        summary += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
-        summary += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
-        parts.append(summary)
-    return "\n\n".join(parts)
+        if row['Impressions'] < 1000:
+            continue
+        block = f"{col}: {row[col]}\n"
+        block += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
+        block += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+        block += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+        summaries.append(block)
+    return "\n\n".join(summaries)
 
-# ========== Main Endpoint ==========
+# ========== Endpoint ==========
 @app.post("/generate-insights/")
 async def generate_insights(
     file: UploadFile = File(...),
@@ -73,143 +61,99 @@ async def generate_insights(
     budget: float = Form(...),
     flight: str = Form(...),
     primary_metric: str = Form(...),
-    secondary_metric: str = Form(None)
+    secondary_metric: str = Form(None),
+    group_columns: str = Form("")  # comma-separated column names
 ):
     try:
-        t0 = time.time()
         contents = await file.read()
         df = pd.read_excel(BytesIO(contents))
-        print("✅ File loaded with columns:", df.columns.tolist())
-
-        required = ['Impressions', 'Clicks', 'Spend']
-        for col in required:
-            if col not in df.columns:
-                return JSONResponse(status_code=400, content={"error": f"Missing column: {col}"})
+        print("✅ File loaded. Columns:", df.columns.tolist())
 
         if 'Total Conversions' not in df.columns:
             df['Total Conversions'] = 0
 
-        df[required + ['Total Conversions']] = df[required + ['Total Conversions']].fillna(0)
+        required_cols = ['Impressions', 'Clicks', 'Spend']
+        for col in required_cols:
+            if col not in df.columns:
+                return JSONResponse(status_code=400, content={"error": f"Missing column: {col}"})
+
+        df[required_cols + ['Total Conversions']] = df[required_cols + ['Total Conversions']].fillna(0)
 
         total_impressions = df['Impressions'].sum()
         total_clicks = df['Clicks'].sum()
         total_spend = df['Spend'].sum()
         total_conversions = df['Total Conversions'].sum()
 
-        ctr = safe_ratio(total_clicks, total_impressions)
+        ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions else 0
         cpm = round((total_spend / total_impressions) * 1000, 2) if total_impressions else 0
         cpc = round(total_spend / total_clicks, 2) if total_clicks else 0
-        conv_rate = safe_ratio(total_conversions, total_impressions)
+        conv_rate = round((total_conversions / total_impressions) * 100, 2) if total_impressions else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
-        print("✅ Totals calculated")
+        summaries = {}
+        for col in group_columns.split(","):
+            col = col.strip()
+            if col in df.columns:
+                summaries[col] = build_group_summary(df, col)
 
-        # Standard breakdowns
-        summaries = {
-            "Line Item Breakdown": build_group_summary(df, "Line Item", "Line Item"),
-            "Creative Performance": build_group_summary(df, "Creative", "Creative"),
-            "Device & OS Analysis": build_group_summary(df, "Device Type", "Device Type") + "\n\n" +
-                                    build_group_summary(df, "Device Model", "Device Model")
-        }
+        breakdowns = "\n\n".join([f"### {col}\n{summary}" for col, summary in summaries.items() if summary])
 
-        # Additional dynamic groupings
-        ignored_cols = {'Impressions', 'Clicks', 'Spend', 'Total Conversions',
-                        'Line Item', 'Creative', 'Device Type', 'Device Model'}
-        dynamic_cols = [col for col in df.columns if col not in ignored_cols and df[col].nunique() <= 25]
-
-        for col in dynamic_cols:
-            label = col.replace("_", " ").title()
-            summary = build_group_summary(df, col, label)
-            if summary:
-                summaries[f"{label} Breakdown"] = summary
-
-        # Build prompt
         prompt = f"""
 You are a professional paid media strategist reporting on a DV360 display campaign.
 
-Use the following report structure where applicable. Only include a section if relevant data is provided for it:
+You must deliver a clear, structured, and confident performance commentary using the following format:
 
 ## Executive Summary  
 ## Performance vs KPIs  
-## Line Item Breakdown  
-## Creative Performance  
-## Device & OS Analysis  
+## Strategic Audience or Line Item Observations  
+## Creative & Platform Insights  
+## Device or Environment Analysis  
 ## Conversion Analysis  
 ## Strategic Observations & Recommendations
 
-Keep your tone professional and data-literate. Use the data provided to explain *why* something performed the way it did. Avoid repeating metric names—interpret them.
+Use first-person, natural tone. You must sound analytical and strategic, not like a speech or dashboard. 
+
+Avoid repeating table values without explanation. Always answer “so what?” when citing a number — why did that happen, what does it mean?
 
 ## CAMPAIGN BRIEF
-- Objective: {objective}
-- CTR Target: {ctr_target}%
-- CPM Target: SGD {cpm_target}
-- Budget: SGD {budget}
-- Flight: {flight}
-- Primary Metric: {primary_metric}
+
+- Objective: {objective}  
+- CTR Target: {ctr_target}%  
+- CPM Target: SGD {cpm_target}  
+- Budget: SGD {budget}  
+- Flight: {flight}  
+- Primary Metric: {primary_metric}  
 - Secondary Metric: {secondary_metric or 'None'}
 
 ## OVERALL PERFORMANCE
-- Impressions: {total_impressions:,}
-- Clicks: {total_clicks:,}
-- CTR: {ctr:.2f}%
-- Spend: SGD {total_spend:,.2f}
-- CPM: SGD {cpm:,.2f}
-- CPC: SGD {cpc:,.2f}
-- Conversions: {total_conversions:,}
-- Conversion Rate: {conv_rate:.2f}%
+
+- Impressions: {total_impressions:,}  
+- Clicks: {total_clicks:,}  
+- CTR: {ctr:.2f}%  
+- Spend: SGD {total_spend:,.2f}  
+- CPM: SGD {cpm:,.2f}  
+- CPC: SGD {cpc:,.2f}  
+- Conversions: {total_conversions:,}  
+- Conversion Rate: {conv_rate:.2f}%  
 - Cost per Conversion: SGD {cost_per_conv:,.2f}
+
+## BREAKDOWNS
+
+{breakdowns}
 """
-
-        for title, section in summaries.items():
-            if section.strip():
-                prompt += f"\n\n## {title}\n{section.strip()}"
-
-        print("📏 Prompt length:", len(prompt.split()))
-        print("⏳ Sending to OpenAI")
 
         response = openai.ChatCompletion.create(
             model="gpt-4-turbo",
-            temperature=0.85,
+            temperature=0.8,
             messages=[
-                {"role": "system", "content": "You write structured, strategic campaign insights like a confident media buyer."},
+                {"role": "system", "content": "You write sharp, confident media campaign insights."},
                 {"role": "user", "content": prompt}
             ]
         )
 
-        report_text = response.choices[0].message.content
-        print("✅ Report generated in", round(time.time() - t0, 2), "seconds")
-        return JSONResponse(content={"report": report_text})
-
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
-
-
-# ========== Chat Endpoint ==========
-class InteractionRequest(BaseModel):
-    insight: str
-    user_prompt: str
-    mode: str
-
-@app.post("/interact-insight/")
-async def interact_with_insight(request: InteractionRequest):
-    try:
-        print("📥 Chat interaction:", request.dict())
-
-        messages = [
-            {"role": "system", "content": "You are a paid media analyst. If mode is 'ask', answer the user's question using the insight text. If 'edit', revise the insight accordingly."},
-            {"role": "user", "content": f"--- Original Insight ---\n{request.insight}"},
-            {"role": "user", "content": f"--- User Prompt ---\n{request.user_prompt}"},
-            {"role": "user", "content": f"Mode: {request.mode}"}
-        ]
-
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            temperature=0.7,
-            messages=messages
-        )
-
         result = response.choices[0].message.content
-        return JSONResponse(content={"result": result})
+        return JSONResponse(content={"report": result})
 
     except Exception as e:
+        import traceback
         return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
