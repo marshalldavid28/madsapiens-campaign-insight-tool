@@ -164,7 +164,7 @@ Please conclude with future suggestions, recommendations and next steps.
 
         print("🧠 Prompt ready. Sending to GPT...")
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-4-turbo",
             temperature=0.85,
             messages=[
                 {"role": "system", "content": "You write structured, strategic campaign insights like a confident media buyer."},
