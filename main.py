@@ -8,11 +8,13 @@ from io import BytesIO
 import os
 from dotenv import load_dotenv
 import time
+import traceback
 
-# ========== Setup ==========
+# Load environment variables
 load_dotenv()
 app = FastAPI()
 
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,37 +23,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# OpenAI key
 openai.api_key = os.getenv("OPENAI_API_KEY")
-print("🔑 OpenAI Key Loaded?", bool(openai.api_key))
+print("🔑 Loaded OpenAI API Key?", bool(openai.api_key))
 
-# ========== Helper Functions ==========
-def build_group_summary(df, col):
-    df[col] = df[col].fillna("Unknown")
-    grouped = df.groupby(col).agg({
-        'Impressions': 'sum',
-        'Clicks': 'sum',
-        'Spend': 'sum',
-        'Total Conversions': 'sum'
-    }).reset_index()
+# Column alias mapping
+COLUMN_ALIASES = {
+    "Spend": ["Spend", "Spends", "Media Cost", "Cost", "Total Spend"],
+    "Clicks": ["Clicks", "Click", "Click Count", "Total Clicks"],
+    "Impressions": ["Impressions", "Imps", "Total Impressions"],
+    "Total Conversions": ["Total Conversions", "Conversions", "All Conversions", "Post Click Conversions"]
+}
 
-    grouped['CTR (%)'] = (grouped['Clicks'] / grouped['Impressions']) * 100
-    grouped['CPM (SGD)'] = (grouped['Spend'] / grouped['Impressions']) * 1000
-    grouped['CPC (SGD)'] = grouped['Spend'] / grouped['Clicks']
-    grouped['Conversion Rate (%)'] = (grouped['Total Conversions'] / grouped['Impressions']) * 100
-    grouped = grouped.fillna(0).sort_values(by='Spend', ascending=False)
+def resolve_column_aliases(df, required_fields, alias_map):
+    resolved = {}
+    for key in required_fields:
+        aliases = alias_map.get(key, [])
+        for alias in aliases:
+            if alias in df.columns:
+                resolved[key] = alias
+                break
+        else:
+            if key == "Total Conversions":
+                df[key] = 0
+                resolved[key] = key
+            else:
+                raise ValueError(f"Missing column: {key} (looked for: {aliases})")
+    return resolved
 
-    summaries = []
-    for _, row in grouped.iterrows():
-        if row['Impressions'] < 1000:
-            continue
-        block = f"{col}: {row[col]}\n"
-        block += f"Impressions: {int(row['Impressions'])}, Clicks: {int(row['Clicks'])}, CTR: {row['CTR (%)']:.2f}%\n"
-        block += f"Spend: SGD {row['Spend']:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
-        block += f"Conversions: {int(row['Total Conversions'])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
-        summaries.append(block)
-    return "\n\n".join(summaries)
+def build_group_summary(df, group_by_col, label, col_map):
+    summary_text = ""
+    if group_by_col in df.columns:
+        grouped = df.groupby(group_by_col).agg({
+            col_map['Impressions']: 'sum',
+            col_map['Clicks']: 'sum',
+            col_map['Spend']: 'sum',
+            col_map['Total Conversions']: 'sum'
+        }).reset_index()
 
-# ========== Endpoint ==========
+        grouped['CTR (%)'] = (grouped[col_map['Clicks']] / grouped[col_map['Impressions']]) * 100
+        grouped['CPM (SGD)'] = (grouped[col_map['Spend']] / grouped[col_map['Impressions']]) * 1000
+        grouped['CPC (SGD)'] = grouped[col_map['Spend']] / grouped[col_map['Clicks']]
+        grouped['Conversion Rate (%)'] = (grouped[col_map['Total Conversions']] / grouped[col_map['Impressions']]) * 100
+        grouped = grouped.fillna(0).sort_values(by=col_map['Spend'], ascending=False).head(5)
+
+        parts = []
+        for _, row in grouped.iterrows():
+            summary = f"{label}: {row[group_by_col]}\n"
+            summary += f"Impressions: {int(row[col_map['Impressions']])}, Clicks: {int(row[col_map['Clicks']])}, CTR: {row['CTR (%)']:.2f}%\n"
+            summary += f"Spend: SGD {row[col_map['Spend']]:.2f}, CPM: SGD {row['CPM (SGD)']:.2f}, CPC: SGD {row['CPC (SGD)']:.2f}\n"
+            summary += f"Conversions: {int(row[col_map['Total Conversions']])}, Conversion Rate: {row['Conversion Rate (%)']:.2f}%"
+            parts.append(summary)
+        summary_text = "\n\n".join(parts)
+    return summary_text
+
 @app.post("/generate-insights/")
 async def generate_insights(
     file: UploadFile = File(...),
@@ -61,28 +86,20 @@ async def generate_insights(
     budget: float = Form(...),
     flight: str = Form(...),
     primary_metric: str = Form(...),
-    secondary_metric: str = Form(None),
-    group_columns: str = Form("")  # comma-separated column names
+    secondary_metric: str = Form(None)
 ):
     try:
         contents = await file.read()
         df = pd.read_excel(BytesIO(contents))
-        print("✅ File loaded. Columns:", df.columns.tolist())
+        print("✅ Excel file loaded with columns:", df.columns.tolist())
 
-        if 'Total Conversions' not in df.columns:
-            df['Total Conversions'] = 0
+        required_fields = ["Spend", "Clicks", "Impressions", "Total Conversions"]
+        col_map = resolve_column_aliases(df, required_fields, COLUMN_ALIASES)
 
-        required_cols = ['Impressions', 'Clicks', 'Spend']
-        for col in required_cols:
-            if col not in df.columns:
-                return JSONResponse(status_code=400, content={"error": f"Missing column: {col}"})
-
-        df[required_cols + ['Total Conversions']] = df[required_cols + ['Total Conversions']].fillna(0)
-
-        total_impressions = df['Impressions'].sum()
-        total_clicks = df['Clicks'].sum()
-        total_spend = df['Spend'].sum()
-        total_conversions = df['Total Conversions'].sum()
+        total_impressions = df[col_map['Impressions']].sum()
+        total_clicks = df[col_map['Clicks']].sum()
+        total_spend = df[col_map['Spend']].sum()
+        total_conversions = df[col_map['Total Conversions']].sum()
 
         ctr = round((total_clicks / total_impressions) * 100, 2) if total_impressions else 0
         cpm = round((total_spend / total_impressions) * 1000, 2) if total_impressions else 0
@@ -90,33 +107,25 @@ async def generate_insights(
         conv_rate = round((total_conversions / total_impressions) * 100, 2) if total_impressions else 0
         cost_per_conv = round(total_spend / total_conversions, 2) if total_conversions else 0
 
-        summaries = {}
-        for col in group_columns.split(","):
-            col = col.strip()
-            if col in df.columns:
-                summaries[col] = build_group_summary(df, col)
-
-        breakdowns = "\n\n".join([f"### {col}\n{summary}" for col, summary in summaries.items() if summary])
+        line_item_summary = build_group_summary(df, "Line Item", "Line Item", col_map)
+        creative_summary = build_group_summary(df, "Creative", "Creative", col_map)
+        device_summary = build_group_summary(df, "Device Type", "Device Type", col_map)
+        os_summary = build_group_summary(df, "Device Model", "Device Model", col_map)
 
         prompt = f"""
-You are a professional paid media strategist reporting on a DV360 display campaign.
+You are a professional paid media strategist reporting on a DV360 campaign.
 
 You must deliver a clear, structured, and confident performance commentary using the following format:
 
 ## Executive Summary  
 ## Performance vs KPIs  
-## Strategic Audience or Line Item Observations  
-## Creative & Platform Insights  
-## Device or Environment Analysis  
+## Line Item Breakdown  
+## Creative Performance  
+## Device & OS Analysis  
 ## Conversion Analysis  
 ## Strategic Observations & Recommendations
 
-Use first-person, natural tone. You must sound analytical and strategic, not like a speech or dashboard. 
-
-Avoid repeating table values without explanation. Always answer “so what?” when citing a number — why did that happen, what does it mean?
-
 ## CAMPAIGN BRIEF
-
 - Objective: {objective}  
 - CTR Target: {ctr_target}%  
 - CPM Target: SGD {cpm_target}  
@@ -126,7 +135,6 @@ Avoid repeating table values without explanation. Always answer “so what?” w
 - Secondary Metric: {secondary_metric or 'None'}
 
 ## OVERALL PERFORMANCE
-
 - Impressions: {total_impressions:,}  
 - Clicks: {total_clicks:,}  
 - CTR: {ctr:.2f}%  
@@ -137,23 +145,34 @@ Avoid repeating table values without explanation. Always answer “so what?” w
 - Conversion Rate: {conv_rate:.2f}%  
 - Cost per Conversion: SGD {cost_per_conv:,.2f}
 
-## BREAKDOWNS
+## LINE ITEM PERFORMANCE
+{line_item_summary or 'No line item data available.'}
 
-{breakdowns}
+## CREATIVE PERFORMANCE
+{creative_summary or 'No creative data available.'}
+
+## DEVICE PERFORMANCE
+{device_summary or 'No device data available.'}
+
+## OS PERFORMANCE
+{os_summary or 'No OS data available.'}
+
+## STRATEGIC OBSERVATIONS
+Please conclude with future suggestions, recommendations and next steps.
 """
 
+        print("🧠 Prompt ready. Sending to GPT...")
         response = openai.ChatCompletion.create(
             model="gpt-4-turbo",
-            temperature=0.8,
+            temperature=0.85,
             messages=[
-                {"role": "system", "content": "You write sharp, confident media campaign insights."},
+                {"role": "system", "content": "You write structured, strategic campaign insights like a confident media buyer."},
                 {"role": "user", "content": prompt}
             ]
         )
 
-        result = response.choices[0].message.content
-        return JSONResponse(content={"report": result})
+        report_text = response.choices[0].message.content
+        return JSONResponse(content={"report": report_text})
 
     except Exception as e:
-        import traceback
         return JSONResponse(status_code=500, content={"error": str(e), "trace": traceback.format_exc()})
